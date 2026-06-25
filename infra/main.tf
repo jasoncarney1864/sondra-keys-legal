@@ -158,7 +158,7 @@ module "ai_services" {
   version = "~> 0.5"
 
   name                = local.ai_services_name
-  resource_group_name = azurerm_resource_group.main.name
+  parent_id           = azurerm_resource_group.main.id
   location            = azurerm_resource_group.main.location
   tags                = local.tags
 
