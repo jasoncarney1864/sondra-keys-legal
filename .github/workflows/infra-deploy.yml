@@ -28,7 +28,7 @@ permissions:
   pull-requests: write
 
 env:
-  TF_VERSION: '1.9.5'
+  TF_VERSION: '1.11.0'
   WORKING_DIR: './infra'
 
 jobs:
