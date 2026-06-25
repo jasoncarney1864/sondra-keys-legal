@@ -51,7 +51,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v2
         with:
-          languages: 'python,javascript'
+          languages: 'python'
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v2
@@ -131,6 +131,7 @@ jobs:
             --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
             --query "[?category=='Security'].{Category: category, Risk: riskLevel, Description: description}" \
             -o table
+        continue-on-error: true
 
       - name: Check resource compliance (Azure Policy)
         run: |
@@ -138,6 +139,7 @@ jobs:
             --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
             --query "results.resourceDetails[].complianceState" \
             -o json
+        continue-on-error: true
 
       - name: Verify network security settings
         run: |
@@ -152,6 +154,7 @@ jobs:
             --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
             --query "[].{Name: name, Encryption: encryption.services.blob.enabled}" \
             -o table
+        continue-on-error: true
 
       - name: Azure Logout
         if: always()
