@@ -46,10 +46,10 @@ module "vnet" {
   source  = "Azure/avm-res-network-virtualnetwork/azurerm"
   version = "~> 0.7"
 
-  name                = local.vnet_name
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  tags                = local.tags
+  name      = local.vnet_name
+  parent_id = azurerm_resource_group.main.id # <-- Updated
+  location  = azurerm_resource_group.main.location
+  tags      = local.tags
 
   address_space = ["10.0.0.0/16"]
 
@@ -72,10 +72,10 @@ module "acr" {
   source  = "Azure/avm-res-containerregistry-registry/azurerm"
   version = "~> 0.4"
 
-  name                = local.acr_name
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  tags                = local.tags
+  name      = local.acr_name
+  parent_id = azurerm_resource_group.main.id # <-- Updated
+  location  = azurerm_resource_group.main.location
+  tags      = local.tags
 
   sku           = "Basic"
   admin_enabled = false # Enforce managed identity auth only
