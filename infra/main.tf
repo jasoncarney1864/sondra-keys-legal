@@ -179,7 +179,7 @@ output "ai_services_endpoint" {
 }
 
 output "ai_services_key" {
-  description = "→ GitHub Secret: AZURE_AI_SERVICES_KEY"
-  value       = module.ai_services.resource.primary_access_key
+  description = "→ GitHub Secret: AZURE_AI_SERVICES_ENDPOINT"
+  value       = module.ai_services.account_keys.key1 # <--- THIS IS THE UPDATED LINE
   sensitive   = true
 }
