@@ -70,8 +70,9 @@ module "acr" {
   location            = azurerm_resource_group.main.location
   tags                = local.tags
 
-  sku           = "Basic"
-  admin_enabled = false # Enforce managed identity auth only
+  sku                     = "Basic"
+  zone_redundancy_enabled = false # <--- ADD THIS LINE TO OVERRIDE THE DEFAULT
+  admin_enabled           = false
 
   enable_telemetry = false
 }
