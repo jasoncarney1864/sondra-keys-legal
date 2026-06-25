@@ -148,6 +148,6 @@ jobs:
             --timeout=300s
 
       - name: Verify pods
-        run: kubectl get pods -l app=sondra-keys-backend -o wide
         run: |
+          kubectl get pods -l app=sondra-keys-backend -o wide
           az logout
