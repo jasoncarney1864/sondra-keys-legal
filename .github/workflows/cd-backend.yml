@@ -1,172 +1,153 @@
-name: Deploy Backend to Azure
+name: CD — Backend
 
+# Triggers on any backend code change or k8s manifest change.
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
     paths:
       - 'backend/**'
+      - 'k8s/**'
       - '.github/workflows/cd-backend.yml'
-  pull_request:
-    branches:
-      - main
-      - develop
-    paths:
-      - 'backend/**'
+  workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/backend
+# OIDC requires id-token: write.
+# contents: read is needed for actions/checkout.
+# packages: write is kept for compatibility; primary registry is ACR.
+permissions:
+  id-token: write
+  contents: read
+  packages: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
-    outputs:
-      image_tag: ${{ steps.image.outputs.tag }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: image
-        run: |
-          TAG=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Image tag: ${TAG}"
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: ${{ steps.image.outputs.tag }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
+  # ──────────────────────────────────────────────
+  # Job 1: Run unit tests in isolation
+  # ──────────────────────────────────────────────
   test:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          cd backend
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-asyncio
+        run: pip install -r backend/requirements.txt pytest pytest-cov pytest-asyncio
 
-      - name: Run unit tests
+      - name: Run tests
         run: |
           cd backend
           pytest tests/ -v --cov=app --cov-report=xml
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
         with:
           files: ./backend/coverage.xml
           flags: unittests
           fail_ci_if_error: false
 
-  deploy:
-    needs: [build, test]
+  # ──────────────────────────────────────────────
+  # Job 2: Build Docker image and push to ACR
+  # ──────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push to ACR
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    # OIDC authentication - no long-lived credentials
-    permissions:
-      id-token: write
-      contents: read
+    needs: test
+
+    outputs:
+      short-sha: ${{ steps.vars.outputs.sha }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set short SHA
+        id: vars
+        run: echo "sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # OIDC login — authenticates to Azure without stored credentials
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ vars.ACR_NAME }}.azurecr.io/sondra-keys-backend:${{ steps.vars.outputs.sha }}
+            ${{ vars.ACR_NAME }}.azurecr.io/sondra-keys-backend:latest
+          # Layer caching in ACR to speed up subsequent builds
+          cache-from: type=registry,ref=${{ vars.ACR_NAME }}.azurecr.io/sondra-keys-backend:cache
+          cache-to:   type=registry,ref=${{ vars.ACR_NAME }}.azurecr.io/sondra-keys-backend:cache,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  # ──────────────────────────────────────────────
+  # Job 3: Deploy to AKS (main branch only)
+  # ──────────────────────────────────────────────
+  deploy:
+    name: Deploy to AKS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    environment: dev
+
+    steps:
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy to Azure Container Instances
+      # Fetch AKS kubeconfig using the logged-in OIDC identity
+      - name: Get AKS credentials
         run: |
-          az containerapp up \
-            --name sondra-keys-backend \
+          az aks get-credentials \
             --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
-            --location ${{ vars.AZURE_REGION }} \
-            --image ${{ needs.build.outputs.image_tag }} \
-            --environment sondra-keys-env \
-            --cpu 1 \
-            --memory 2 \
-            --environment-type managed
+            --name          ${{ vars.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
 
-      - name: Deploy Infrastructure (Bicep)
+      # Stamp the ACR login server and image tag into the manifest at deploy time.
+      # The manifest on disk uses ACR_LOGIN_SERVER / IMAGE_TAG as placeholders.
+      - name: Patch image reference in deployment manifest
         run: |
-          az deployment group create \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
-            --template-file infra/bicep/backend.bicep \
-            --parameters \
-              location=${{ vars.AZURE_REGION }} \
-              containerImage=${{ needs.build.outputs.image_tag }} \
-              environment=production
+          sed -i \
+            -e "s|ACR_LOGIN_SERVER|${{ vars.ACR_NAME }}.azurecr.io|g" \
+            -e "s|IMAGE_TAG|${{ needs.build-and-push.outputs.short-sha }}|g" \
+            k8s/backend-deployment.yaml
 
-      - name: Run health check
+      - name: Apply Kubernetes manifests
         run: |
-          ENDPOINT=$(az containerapp show \
-            --name sondra-keys-backend \
-            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
-            --query properties.configuration.ingress.fqdn -o tsv)
-          
-          # Wait for endpoint to be ready
-          for i in {1..30}; do
-            if curl -f https://${ENDPOINT}/health; then
-              echo "Health check passed"
-              exit 0
-            fi
-            echo "Attempt $i/30 - Waiting for service..."
-            sleep 10
-          done
-          
-          echo "Health check failed"
-          exit 1
+          kubectl apply -f k8s/backend-service.yaml
+          kubectl apply -f k8s/backend-deployment.yaml
 
-      - name: Post deployment notification
-        if: always()
-        uses: 8398a7/action-slack@v3
-        with:
-          status: ${{ job.status }}
-          text: |
-            Backend deployment ${{ job.status }}
-            Commit: ${{ github.sha }}
-            Image: ${{ needs.build.outputs.image_tag }}
-          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
-        continue-on-error: true
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/sondra-keys-backend \
+            --timeout=300s
 
-      - name: Azure Logout
-        if: always()
+      - name: Verify pods
+        run: kubectl get pods -l app=sondra-keys-backend -o wide
         run: |
           az logout
