@@ -1,0 +1,61 @@
+# Backend dependencies for Sondra Keys Legal Q&A
+
+# Core FastAPI framework
+fastapi==0.110.0
+uvicorn[standard]==0.27.0
+pydantic==2.6.0
+pydantic-settings==2.2.0
+
+# Azure SDK packages
+azure-storage-blob==12.20.0
+azure-search-documents==11.4.0
+azure-identity==1.14.0
+azure-ai-documentintelligence==1.0.0
+azure-openai==1.8.0
+
+# HTTP client
+httpx==0.26.0
+requests==2.31.0
+
+# Database ORM
+sqlalchemy==2.0.25
+alembic==1.13.1
+psycopg2-binary==2.9.9  # PostgreSQL adapter
+
+# Data validation and parsing
+python-multipart==0.0.6
+
+# Logging and monitoring
+python-json-logger==2.0.7
+opentelemetry-api==1.21.0
+opentelemetry-sdk==1.21.0
+opentelemetry-instrumentation-fastapi==0.42b0
+opentelemetry-instrumentation-sqlalchemy==0.42b0
+opentelemetry-exporter-azure-monitor==1.1.0
+
+# Security and authentication
+PyJWT==2.8.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography==41.0.7
+
+# Async utilities
+asyncio-contextmanager==1.0.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.23.2
+pytest-cov==4.1.0
+pytest-mock==3.13.0
+httpx==0.26.0
+
+# Development
+black==24.1.1
+flake8==7.0.0
+isort==5.13.2
+mypy==1.8.0
+pre-commit==3.6.0
+
+# Utilities
+python-dotenv==1.0.0
+structlog==24.1.0

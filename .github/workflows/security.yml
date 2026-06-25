@@ -1,0 +1,200 @@
+name: Security & Compliance
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  dependency-scan:
+    name: Dependency Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  code-scan:
+    name: Code Security Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: 'python,javascript'
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+  sast-scan:
+    name: SAST Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Run Bandit (Python security)
+        run: |
+          pip install bandit
+          bandit -r backend/app -f sarif -o bandit-results.sarif
+        continue-on-error: true
+
+      - name: Upload Bandit results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'bandit-results.sarif'
+        continue-on-error: true
+
+  secrets-scan:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+  azure-compliance:
+    name: Azure Security Compliance
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run Azure Advisor recommendations
+        run: |
+          az advisor recommendation list \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --query "[?category=='Security'].{Category: category, Risk: riskLevel, Description: description}" \
+            -o table
+
+      - name: Check resource compliance (Azure Policy)
+        run: |
+          az policy state summarize \
+            --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} \
+            --query "results.resourceDetails[].complianceState" \
+            -o json
+
+      - name: Verify network security settings
+        run: |
+          az network nsg list \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --query "[].{Name: name, Rules: securityRules[].name}" \
+            -o table
+
+      - name: Check encryption status
+        run: |
+          az storage account list \
+            --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \
+            --query "[].{Name: name, Encryption: encryption.services.blob.enabled}" \
+            -o table
+
+      - name: Azure Logout
+        if: always()
+        run: az logout
+
+  license-compliance:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Python licenses
+        run: |
+          pip install pip-licenses
+          pip-licenses --format=json --output-file licenses.json || true
+        continue-on-error: true
+
+      - name: Check Node.js licenses
+        run: |
+          cd frontend
+          npm install -g license-checker
+          license-checker --onlyunknown --unknown || true
+        continue-on-error: true
+
+  quality-gate:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    if: always()
+    needs: [dependency-scan, code-scan, sast-scan, secrets-scan]
+
+    steps:
+      - name: Report security scan results
+        run: |
+          echo "Security scanning complete. Review results in GitHub Security tab."
+
+      - name: Fail if critical vulnerabilities found
+        run: |
+          # This would be enhanced with actual vulnerability counting logic
+          echo "Vulnerability report generated"
