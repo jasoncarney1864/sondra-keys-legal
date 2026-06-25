@@ -1,0 +1,33 @@
+################################################################################
+# Sondra Keys Legal — Kubernetes Service
+#
+# Exposes the FastAPI backend via an Azure Load Balancer.
+#
+# Note: For production, replace `type: LoadBalancer` with `type: ClusterIP`
+# and front it with an Ingress controller (e.g., nginx-ingress or
+# Application Gateway Ingress Controller) for TLS termination,
+# path-based routing, and WAF protection.
+################################################################################
+apiVersion: v1
+kind: Service
+metadata:
+  name: sondra-keys-backend
+  namespace: default
+  labels:
+    app: sondra-keys-backend
+    tier: backend
+  annotations:
+    # Azure-specific: provision an internal load balancer (private IP).
+    # Remove this annotation to get a public IP instead.
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: sondra-keys-backend
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8000
+  # Preserve the client source IP (useful for audit logging)
+  externalTrafficPolicy: Local
