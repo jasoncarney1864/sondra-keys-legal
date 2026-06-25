@@ -84,57 +84,50 @@ module "acr" {
 }
 
 # ────────────────────────────────────────────────
-# AKS Cluster — AVM  (ALZ / Landing Zone pattern)
-# Cost-optimized:
-#   - Free tier (no SLA uptime guarantee — acceptable for dev/learning)
-#   - Single Standard_B2s node (2 vCPU / 4 GB RAM, ~$30/month)
-#   - No auto-scaler to prevent surprise costs
+# AKS Cluster — Native Resource (Replaces Hallucinated AVM)
 # ────────────────────────────────────────────────
-module "aks" {
-  source  = "Azure/avm-res-containerservice-managedcluster/azurerm"
-  version = "~> 0.3"
-
+resource "azurerm_kubernetes_cluster" "aks" {
   name                = local.aks_name
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   tags                = local.tags
 
-  # Free tier: no guaranteed API server SLA. Use Standard/Premium in prod.
   sku_tier           = "Free"
   kubernetes_version = "1.30"
 
-  default_node_pool = {
+  default_node_pool {
     name       = "system"
     vm_size    = "Standard_B2s"
     node_count = 1
 
-    # Pin to the AKS subnet
     vnet_subnet_id = module.vnet.subnets["aks"].resource_id
 
-    # Disable auto-scaling — fixed single node for cost control
     enable_auto_scaling = false
-
-    os_disk_size_gb = 30
-    os_disk_type    = "Managed"
+    os_disk_size_gb     = 30
+    os_disk_type        = "Managed"
   }
 
-  # System-assigned managed identity — no client secret to rotate
-  managed_identities = {
-    system_assigned = true
+  identity {
+    type = "SystemAssigned"
   }
 
-  network_profile = {
-    network_plugin = "azure" # Azure CNI — pods get VNet IPs
+  network_profile {
+    network_plugin = "azure"
     service_cidr   = "10.1.0.0/16"
     dns_service_ip = "10.1.0.10"
   }
 
-  # Workload Identity + OIDC Issuer — enables pod-level Azure AD auth.
-  # Required for Service Account token projection (zero-secret pod auth).
   oidc_issuer_enabled       = true
   workload_identity_enabled = true
+}
 
-  enable_telemetry = false
+# Grant AKS kubelet identity permission to pull images from ACR
+resource "azurerm_role_assignment" "aks_acr_pull" {
+  scope                = module.acr.resource_id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
+
+  depends_on = [azurerm_kubernetes_cluster.aks, module.acr]
 }
 
 # Grant AKS kubelet identity permission to pull images from ACR.
