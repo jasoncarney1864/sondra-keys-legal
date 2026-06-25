@@ -124,7 +124,7 @@ module "aks" {
   }
 
   network_profile = {
-    network_plugin = "azure"   # Azure CNI — pods get VNet IPs
+    network_plugin = "azure" # Azure CNI — pods get VNet IPs
     service_cidr   = "10.1.0.0/16"
     dns_service_ip = "10.1.0.10"
   }
