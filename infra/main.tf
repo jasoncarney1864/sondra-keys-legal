@@ -85,6 +85,8 @@ resource "azurerm_kubernetes_cluster" "aks" {
   location            = azurerm_resource_group.main.location
   tags                = local.tags
 
+  dns_prefix = local.aks_name
+
   sku_tier           = "Free"
   kubernetes_version = "1.30"
 
