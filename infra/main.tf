@@ -157,10 +157,10 @@ module "ai_services" {
   source  = "Azure/avm-res-cognitiveservices-account/azurerm"
   version = "~> 0.5"
 
-  name                = local.ai_services_name
-  parent_id           = azurerm_resource_group.main.id
-  location            = azurerm_resource_group.main.location
-  tags                = local.tags
+  name      = local.ai_services_name
+  parent_id = azurerm_resource_group.main.id
+  location  = azurerm_resource_group.main.location
+  tags      = local.tags
 
   kind     = "CognitiveServices"
   sku_name = "S0"
