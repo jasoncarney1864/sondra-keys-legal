@@ -175,11 +175,11 @@ output "acr_login_server" {
 
 output "ai_services_endpoint" {
   description = "→ GitHub Secret: AZURE_AI_SERVICES_ENDPOINT"
-  value       = module.ai_services.resource.endpoint
+  value       = module.ai_services.endpoint
 }
 
 output "ai_services_key" {
-  description = "→ GitHub Secret: AZURE_AI_SERVICES_ENDPOINT"
-  value       = module.ai_services.account_keys.key1 # <--- THIS IS THE UPDATED LINE
+  description = "→ GitHub Secret: AZURE_AI_SERVICES_KEY"
+  value       = module.ai_services.primary_access_key
   sensitive   = true
 }
