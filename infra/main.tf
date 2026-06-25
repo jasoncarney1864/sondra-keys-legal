@@ -130,16 +130,6 @@ resource "azurerm_role_assignment" "aks_acr_pull" {
   depends_on = [azurerm_kubernetes_cluster.aks, module.acr]
 }
 
-# Grant AKS kubelet identity permission to pull images from ACR.
-# This is the recommended pattern — avoids storing registry credentials.
-resource "azurerm_role_assignment" "aks_acr_pull" {
-  scope                = module.acr.resource_id
-  role_definition_name = "AcrPull"
-  principal_id         = module.aks.resource.kubelet_identity[0].object_id
-
-  depends_on = [module.aks, module.acr]
-}
-
 # ────────────────────────────────────────────────
 # Azure AI Services (Cognitive Services) — AVM
 # Single multi-service account covers: Content Understanding,
@@ -175,7 +165,7 @@ output "resource_group_name" {
 
 output "aks_cluster_name" {
   description = "→ GitHub Variable: AKS_CLUSTER_NAME"
-  value       = module.aks.resource.name
+  value       = azurerm_kubernetes_cluster.aks.name
 }
 
 output "acr_name" {
