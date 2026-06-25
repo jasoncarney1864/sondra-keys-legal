@@ -39,28 +39,21 @@ resource "azurerm_resource_group" "main" {
 }
 
 # ────────────────────────────────────────────────
-# Virtual Network — AVM
-# Provides isolated network space for the AKS cluster.
+# Virtual Network & Subnet — Native Resources (Replaces Buggy AVM)
 # ────────────────────────────────────────────────
-module "vnet" {
-  source  = "Azure/avm-res-network-virtualnetwork/azurerm"
-  version = "~> 0.7"
+resource "azurerm_virtual_network" "vnet" {
+  name                = local.vnet_name
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  address_space       = ["10.0.0.0/16"]
+  tags                = local.tags
+}
 
-  name      = local.vnet_name
-  parent_id = azurerm_resource_group.main.id # <-- Updated
-  location  = azurerm_resource_group.main.location
-  tags      = local.tags
-
-  address_space = ["10.0.0.0/16"]
-
-  subnets = {
-    aks = {
-      name             = "snet-aks"
-      address_prefixes = ["10.0.1.0/24"]
-    }
-  }
-
-  enable_telemetry = false
+resource "azurerm_subnet" "aks" {
+  name                 = "snet-aks"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
 }
 
 # ────────────────────────────────────────────────
@@ -100,7 +93,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
     vm_size    = "Standard_B2s"
     node_count = 1
 
-    vnet_subnet_id = module.vnet.subnets["aks"].resource_id
+    vnet_subnet_id = azurerm_subnet.aks.id
 
     enable_auto_scaling = false
     os_disk_size_gb     = 30
