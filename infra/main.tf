@@ -95,9 +95,8 @@ resource "azurerm_kubernetes_cluster" "aks" {
 
     vnet_subnet_id = azurerm_subnet.aks.id
 
-    enable_auto_scaling = false
-    os_disk_size_gb     = 30
-    os_disk_type        = "Managed"
+    os_disk_size_gb = 30
+    os_disk_type    = "Managed"
   }
 
   identity {
