@@ -5,10 +5,12 @@ Document management routes: upload, retrieve, list, delete.
 import hashlib
 import logging
 import os
+from urllib.parse import quote
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import func, select
+from fastapi.responses import Response
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +24,7 @@ from backend.app.api.dependencies import (
 )
 from backend.app.core.config import settings
 from backend.app.core.database import async_session_maker
+from backend.app.core.exceptions import BlobNotFoundException
 from backend.app.core.exceptions import (
     FileSizeExceededException,
     UnsupportedFileTypeException,
@@ -33,6 +36,7 @@ from backend.app.models.db import (
     UserSessionORM,
 )
 from backend.app.models.schemas import (
+    DocumentDownloadResponse,
     DocumentListResponse,
     DocumentRecord,
     DocumentUploadResponse,
@@ -510,6 +514,115 @@ async def list_documents(
 
 
 @router.get(
+    "/{document_id}/download",
+)
+async def download_document(
+    document_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+    service: AbstractDocumentService = Depends(get_document_service),
+) -> Response:
+    """Stream original uploaded document bytes as an attachment download."""
+    try:
+        parsed_id = UUID(document_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid document ID format: {document_id}",
+        ) from e
+
+    if not await _has_document_access(session, current_user_id, parsed_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    doc_record = await session.get(DocumentRecordORM, parsed_id)
+    if not doc_record:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    if not doc_record.blob_name:
+        raise HTTPException(
+            status_code=409,
+            detail="Original file is not available for download yet.",
+        )
+
+    file_bytes = await service.download_blob(doc_record.blob_name)
+    encoded_name = quote(doc_record.file_name)
+
+    logger.info(
+        "document_download_streamed",
+        document_id=document_id,
+        user_id=current_user_id,
+        file_name=doc_record.file_name,
+    )
+
+    return Response(
+        content=file_bytes,
+        media_type=doc_record.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+        },
+    )
+
+
+@router.get(
+    "/{document_id}/download-url",
+    response_model=DocumentDownloadResponse,
+)
+async def get_document_download_url(
+    document_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+    service: AbstractDocumentService = Depends(get_document_service),
+) -> DocumentDownloadResponse:
+    """Return a short-lived signed URL for downloading the original uploaded file."""
+    try:
+        parsed_id = UUID(document_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid document ID format: {document_id}",
+        ) from e
+
+    if not await _has_document_access(session, current_user_id, parsed_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    doc_record = await session.get(DocumentRecordORM, parsed_id)
+    if not doc_record:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    if not doc_record.blob_name:
+        raise HTTPException(
+            status_code=409,
+            detail="Original file is not available for download yet.",
+        )
+
+    download_url = await service.get_blob_url(doc_record.blob_name)
+
+    logger.info(
+        "document_download_url_generated",
+        document_id=document_id,
+        user_id=current_user_id,
+    )
+
+    return DocumentDownloadResponse(
+        document_id=doc_record.id,
+        file_name=doc_record.file_name,
+        download_url=download_url,
+    )
+
+
+@router.get(
     "/{document_id}",
     response_model=DocumentRecord,
 )
@@ -572,7 +685,6 @@ async def delete_document(
     document_id: str,
     session: AsyncSession = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
-    current_session: UserSessionORM = Depends(get_current_session),
     service: AbstractDocumentService = Depends(get_document_service),
     search_service = Depends(get_search_service),
 ) -> None:
@@ -597,7 +709,8 @@ async def delete_document(
             detail=f"Invalid document ID format: {document_id}",
         )
 
-    # Validate ownership/access
+    # Validate ownership/access.
+    # Idempotent behavior: if no mapping exists, treat as already deleted.
     access = (
         await session.execute(
             select(UserDocumentAccessORM).where(
@@ -607,18 +720,25 @@ async def delete_document(
         )
     ).scalar_one_or_none()
     if access is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Document {document_id} not found.",
+        logger.info(
+            "document_deletion_noop_no_access",
+            document_id=document_id,
+            user_id=current_user_id,
         )
+        return
 
-    # Get document record
+    # Get document record. If mapping exists but record is gone, clean stale
+    # mapping and return success (idempotent).
     doc_record = await session.get(DocumentRecordORM, parsed_id)
     if not doc_record:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Document {document_id} not found.",
+        await session.delete(access)
+        await session.commit()
+        logger.warning(
+            "document_deletion_stale_access_removed",
+            document_id=document_id,
+            user_id=current_user_id,
         )
+        return
 
     logger.info(
         "document_deletion_initiated",
@@ -626,57 +746,82 @@ async def delete_document(
         file_name=doc_record.file_name,
     )
 
-    # First, remove current user's access mapping.
-    await session.delete(access)
-    if current_session.active_document_id == parsed_id:
-        current_session.active_document_id = None
-    await session.flush()
-
-    remaining_links = (
-        await session.execute(
-            select(func.count(UserDocumentAccessORM.user_id)).where(
-                UserDocumentAccessORM.document_id == parsed_id
-            )
-        )
-    ).scalar() or 0
-
-    # If other users still reference this document, stop at unlinking.
-    if remaining_links > 0:
-        await session.commit()
-        logger.info(
-            "document_access_removed_only",
-            document_id=document_id,
-            remaining_links=remaining_links,
-            user_id=current_user_id,
-        )
-        return
-
-    # Step 1: Delete from search index
+    # Step 1: Delete from search index.
     try:
         await search_service.delete_document_chunks(document_id)
         logger.info("search_index_cleanup_completed", document_id=document_id)
     except Exception as e:
-        logger.warning(
+        logger.error(
             f"search_index_cleanup_failed: {type(e).__name__}",
             document_id=document_id,
             error_detail=str(e),
         )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to remove indexed chunks for this document. Retry deletion.",
+        ) from e
 
-    # Step 2: Delete blob from storage
+    # Step 2: Delete all blob artifacts from storage.
+    blob_names_to_delete = [doc_record.blob_name]
+    if doc_record.parsed_json_blob_name:
+        blob_names_to_delete.append(doc_record.parsed_json_blob_name)
+
+    for blob_name in blob_names_to_delete:
+        if not blob_name:
+            continue
+
+        try:
+            await service.delete_blob(blob_name)
+            logger.info(
+                "blob_cleanup_completed",
+                document_id=document_id,
+                blob_name=blob_name,
+            )
+        except BlobNotFoundException:
+            logger.info(
+                "blob_cleanup_skipped_not_found",
+                document_id=document_id,
+                blob_name=blob_name,
+            )
+        except Exception as e:
+            logger.error(
+                f"blob_cleanup_failed: {type(e).__name__}",
+                document_id=document_id,
+                blob_name=blob_name,
+                error_detail=str(e),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Failed to remove stored document artifacts. Retry deletion.",
+            ) from e
+
+    # Step 3: Remove DB metadata and session/access references.
+    # Keep this in one transaction for atomic database cleanup.
     try:
-        if doc_record.blob_name:
-            await service.delete_blob(doc_record.blob_name)
-            logger.info("blob_cleanup_completed", document_id=document_id, blob_name=doc_record.blob_name)
+        await session.execute(
+            update(UserSessionORM)
+            .where(UserSessionORM.active_document_id == parsed_id)
+            .values(active_document_id=None)
+        )
+        await session.execute(
+            delete(UserDocumentAccessORM).where(
+                UserDocumentAccessORM.document_id == parsed_id
+            )
+        )
+        await session.delete(doc_record)
+        await session.commit()
     except Exception as e:
-        logger.warning(
-            f"blob_cleanup_failed: {type(e).__name__}",
+        await session.rollback()
+        logger.error(
+            f"document_db_cleanup_failed: {type(e).__name__}",
             document_id=document_id,
             error_detail=str(e),
+            exc_info=True,
         )
-
-    # Step 3: Delete database records (cascade deletes chunks via FK)
-    await session.delete(doc_record)
-    await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document artifacts were removed but metadata cleanup failed. Retry deletion.",
+        ) from e
 
     logger.info(
         "document_deletion_completed",
