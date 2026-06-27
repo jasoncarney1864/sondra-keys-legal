@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" role="img" aria-label="Painterly sunflower bouquet">
+  <defs>
+    <filter id="impasto" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="3" seed="19"/>
+      <feDisplacementMap in="SourceGraphic" scale="11"/>
+      <feGaussianBlur stdDeviation="0.45"/>
+    </filter>
+
+    <filter id="softStroke" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.014" numOctaves="2" seed="5"/>
+      <feDisplacementMap in="SourceGraphic" scale="6"/>
+    </filter>
+
+    <radialGradient id="petalCore" cx="48%" cy="42%" r="62%">
+      <stop offset="0" stop-color="#ffd55f"/>
+      <stop offset="0.55" stop-color="#f0b53f"/>
+      <stop offset="1" stop-color="#c77826"/>
+    </radialGradient>
+
+    <radialGradient id="petalShadow" cx="55%" cy="60%" r="60%">
+      <stop offset="0" stop-color="#f3b14b"/>
+      <stop offset="1" stop-color="#9e571f"/>
+    </radialGradient>
+
+    <radialGradient id="disc" cx="50%" cy="48%" r="62%">
+      <stop offset="0" stop-color="#6d3c1d"/>
+      <stop offset="1" stop-color="#2f180d"/>
+    </radialGradient>
+  </defs>
+
+  <g filter="url(#impasto)" opacity="0.98">
+    <g transform="translate(570 410)">
+      <g filter="url(#softStroke)" fill="url(#petalCore)">
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(0)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(20)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(42)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(66)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(92)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(118)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(145)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(172)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(197)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(223)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(248)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(275)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(301)"/>
+        <path d="M0-168c22 40 24 76 0 120c-24-44-24-80 0-120z" transform="rotate(328)"/>
+      </g>
+      <g opacity="0.82" fill="url(#petalShadow)">
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(9)"/>
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(57)"/>
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(103)"/>
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(151)"/>
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(199)"/>
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(247)"/>
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(295)"/>
+        <path d="M0-136c14 27 15 52 0 82c-16-30-15-55 0-82z" transform="rotate(343)"/>
+      </g>
+      <circle r="86" fill="url(#disc)"/>
+      <circle r="69" fill="#4e2a15" opacity="0.55"/>
+      <circle r="43" fill="#83502a" opacity="0.4"/>
+    </g>
+
+    <g transform="translate(315 300) scale(0.78)">
+      <g filter="url(#softStroke)" fill="url(#petalCore)">
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(6)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(36)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(67)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(98)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(129)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(160)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(192)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(223)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(254)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(285)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(316)"/>
+        <path d="M0-150c20 37 22 71 0 112c-22-41-22-75 0-112z" transform="rotate(347)"/>
+      </g>
+      <circle r="73" fill="url(#disc)"/>
+      <circle r="56" fill="#4c2814" opacity="0.52"/>
+      <circle r="35" fill="#85532b" opacity="0.38"/>
+    </g>
+  </g>
+</svg>

@@ -1,86 +1,151 @@
 """
-Document management endpoints for upload, retrieval, and deletion.
-Handles document lifecycle in the Q&A system.
+Document management routes: upload, retrieve, list, delete.
 """
 
+import hashlib
 import logging
 import os
-from typing import Optional
-from uuid import uuid4
+from uuid import NAMESPACE_URL, UUID, uuid5
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.dependencies import (
+    get_current_session,
+    get_current_user_id,
+    get_document_service,
+    get_db_session,
+    get_pipeline_orchestrator,
+    get_search_service,
+)
 from backend.app.core.config import settings
-from backend.app.services.document_processor import DocumentProcessor
-from backend.app.services.chunker import RecursiveCharacterChunker
+from backend.app.core.database import async_session_maker
+from backend.app.core.exceptions import (
+    FileSizeExceededException,
+    UnsupportedFileTypeException,
+)
+from backend.app.models.db import (
+    DocumentRecordORM,
+    ProcessingStatus,
+    UserDocumentAccessORM,
+    UserSessionORM,
+)
+from backend.app.models.schemas import (
+    DocumentListResponse,
+    DocumentRecord,
+    DocumentUploadResponse,
+)
+from backend.app.services.interfaces import AbstractDocumentService
+from backend.app.services.orchestrator import DocumentPipelineOrchestrator
 
-logger = logging.getLogger(__name__)
+import structlog
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
 
-# ============================================================================
-# Pydantic Models
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
-class DocumentMetadata(BaseModel):
-    """Metadata about an uploaded document."""
-
-    document_id: str
-    file_name: str
-    file_size: int
-    upload_timestamp: str
-    page_count: Optional[int] = None
-    processing_status: str = "completed"
-
-
-class DocumentUploadResponse(BaseModel):
-    """Response after document upload and processing."""
-
-    document_id: str
-    file_name: str
-    status: str
-    message: str
-    chunks_created: int
-
-
-class DocumentListResponse(BaseModel):
-    """Response with list of documents."""
-
-    documents: list[DocumentMetadata]
-    total_count: int
-
-
-# ============================================================================
-# Dependencies
-# ============================================================================
-
-
-async def verify_api_key(api_key: Optional[str] = None) -> None:
+def _validate_upload(filename: str, data: bytes) -> None:
     """
-    Verify API key from request header.
-    
-    Args:
-        api_key: API key from X-API-Key header
-        
-    Raises:
-        HTTPException: If API key is invalid
+    Gate file size and extension before touching any external service.
+
+    Raises FileSizeExceededException or UnsupportedFileTypeException so the
+    global handlers in main.py convert them to 413 / 400 responses.
     """
-    # In a real app, you'd validate against a database or secrets store
-    # For now, we compare against the configured API key
-    if api_key != settings.security.api_key:
-        logger.warning("Invalid API key attempt")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
+    size_mb = len(data) / (1024 * 1024)
+    if size_mb > settings.security.max_file_size_mb:
+        raise FileSizeExceededException(
+            f"File '{filename}' is {size_mb:.1f} MB — "
+            f"maximum allowed is {settings.security.max_file_size_mb} MB."
+        )
+
+    _, ext = os.path.splitext(filename)
+    if ext.lower() not in settings.security.allowed_file_types:
+        raise UnsupportedFileTypeException(
+            f"File type '{ext}' is not supported. "
+            f"Allowed types: {', '.join(settings.security.allowed_file_types)}."
         )
 
 
-# ============================================================================
-# Endpoints
-# ============================================================================
+def _compute_content_hash(data: bytes) -> str:
+    """Return a stable SHA-256 hash for byte-level upload deduplication."""
+    return hashlib.sha256(data).hexdigest()
+
+
+def _deterministic_document_id(content_hash: str) -> UUID:
+    """Map a content hash to a stable UUID for repeatable ingest identity."""
+    return uuid5(NAMESPACE_URL, f"sondra-keys-legal:{content_hash}")
+
+
+_NON_RETRYABLE_FAILURE_MARKERS = (
+    "invalidcontent",
+    "unsupported format",
+    "file is corrupted",
+    "password-protected",
+    "encrypted",
+)
+
+
+def _is_non_retryable_failure(error_message: str | None) -> bool:
+    """Return True when a failed ingest should not be automatically retried."""
+    if not error_message:
+        return False
+
+    normalized = error_message.lower()
+    return any(marker in normalized for marker in _NON_RETRYABLE_FAILURE_MARKERS)
+
+
+async def _ensure_document_access(
+    session: AsyncSession,
+    user_id: str,
+    document_id: UUID,
+) -> None:
+    """Create user-document access mapping if it does not exist."""
+    existing = (
+        await session.execute(
+            select(UserDocumentAccessORM).where(
+                UserDocumentAccessORM.user_id == user_id,
+                UserDocumentAccessORM.document_id == document_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        session.add(
+            UserDocumentAccessORM(
+                user_id=user_id,
+                document_id=document_id,
+            )
+        )
+        await session.flush()
+
+
+async def _has_document_access(
+    session: AsyncSession,
+    user_id: str,
+    document_id: UUID,
+) -> bool:
+    """Return True if user has access link for this document."""
+    access = (
+        await session.execute(
+            select(UserDocumentAccessORM).where(
+                UserDocumentAccessORM.user_id == user_id,
+                UserDocumentAccessORM.document_id == document_id,
+            )
+        )
+    ).scalar_one_or_none()
+    return access is not None
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -90,133 +155,412 @@ async def verify_api_key(api_key: Optional[str] = None) -> None:
 )
 async def upload_document(
     file: UploadFile = File(...),
-    api_key: str = Depends(verify_api_key),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    session: AsyncSession = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+    current_session: UserSessionORM = Depends(get_current_session),
+    orchestrator: DocumentPipelineOrchestrator = Depends(get_pipeline_orchestrator),
 ) -> DocumentUploadResponse:
     """
-    Upload and process a legal document.
-    
-    Accepts PDF, DOCX, DOC, and TXT files. Extracts text, generates chunks,
-    and prepares for semantic search.
-    
-    Args:
-        file: Document file to upload
-        api_key: API key for authentication (header: X-API-Key)
-        
-    Returns:
-        Upload response with document ID and chunk count
-        
+    Upload and queue a legal document for processing.
+
+    Returns HTTP 202 Accepted immediately with a document record in PENDING state.
+    Processing (extraction, chunking, indexing) runs asynchronously in the background.
+
+    Pipeline (background): validate → blob upload → Document Intelligence →
+    chunk splitting → embedding generation → search indexing → database persistence.
+
     Raises:
-        HTTPException: If file type not supported or processing fails
+        FileSizeExceededException (413): File exceeds size limit
+        UnsupportedFileTypeException (400): File type not supported
+        StorageServiceException (503): Database or blob storage error
     """
-    # Validate file size
-    file_content = await file.read()
-    file_size_mb = len(file_content) / (1024 * 1024)
-    
-    if file_size_mb > settings.security.max_file_size_mb:
-        logger.warning(
-            f"File too large: {file.filename} ({file_size_mb:.2f}MB)",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds maximum size of {settings.security.max_file_size_mb}MB",
+    file_data = await file.read()
+
+    # Validate before creating database record
+    _validate_upload(file.filename, file_data)
+
+    content_hash = _compute_content_hash(file_data)
+    canonical_blob_name = f"content/{content_hash}"
+
+    # Check if an identical file is already known.
+    existing_stmt = select(DocumentRecordORM).where(
+        DocumentRecordORM.blob_name == canonical_blob_name
+    )
+    existing_doc = (await session.execute(existing_stmt)).scalar_one_or_none()
+
+    if existing_doc:
+        await _ensure_document_access(session, current_user_id, existing_doc.id)
+        current_session.active_document_id = existing_doc.id
+
+        logger.info(
+            "document_upload_deduplicated",
+            existing_document_id=str(existing_doc.id),
+            existing_status=existing_doc.processing_status.value,
+            file_name=file.filename,
+            file_size_bytes=len(file_data),
+            content_hash_prefix=content_hash[:12],
+            user_id=current_user_id,
+            session_id=str(current_session.id),
+            active_document_id=str(existing_doc.id),
         )
 
-    # Validate file type
-    _, ext = os.path.splitext(file.filename)
-    if ext.lower() not in settings.security.allowed_file_types:
-        logger.warning(
-            f"Invalid file type: {ext}",
+        if existing_doc.processing_status == ProcessingStatus.FAILED:
+            if _is_non_retryable_failure(existing_doc.error_message):
+                await session.commit()
+                logger.info(
+                    "document_processing_requeue_skipped_non_retryable",
+                    document_id=str(existing_doc.id),
+                    error_preview=(existing_doc.error_message or "")[:120],
+                    user_id=current_user_id,
+                    session_id=str(current_session.id),
+                )
+                return DocumentUploadResponse(
+                    document_id=existing_doc.id,
+                    file_name=existing_doc.file_name,
+                    status=ProcessingStatus.FAILED.value,
+                    message=(
+                        "An identical failed document was found, but the failure "
+                        "appears non-retryable (unsupported/corrupted content). "
+                        "Reprocessing was not queued."
+                    ),
+                    chunks_created=0,
+                )
+
+            # Allow deterministic retry on the same document ID.
+            existing_doc.processing_status = ProcessingStatus.PENDING
+            existing_doc.error_message = None
+            existing_doc.completed_timestamp = None
+            await session.commit()
+
+            background_tasks.add_task(
+                orchestrator.run_pipeline,
+                document_id=existing_doc.id,
+                file_bytes=file_data,
+                file_name=existing_doc.file_name,
+                session_factory=async_session_maker,
+            )
+
+            logger.info(
+                "document_processing_requeued",
+                document_id=str(existing_doc.id),
+                user_id=current_user_id,
+                session_id=str(current_session.id),
+            )
+
+            return DocumentUploadResponse(
+                document_id=existing_doc.id,
+                file_name=existing_doc.file_name,
+                status="pending",
+                message=(
+                    "An identical failed document was found. "
+                    "Reprocessing has been queued."
+                ),
+                chunks_created=0,
+            )
+
+        # For completed or in-progress documents, do not enqueue a duplicate task.
+        await session.commit()
+        return DocumentUploadResponse(
+            document_id=existing_doc.id,
+            file_name=existing_doc.file_name,
+            status=existing_doc.processing_status.value,
+            message=(
+                "An identical document is already being processed."
+                if existing_doc.processing_status
+                in {
+                    ProcessingStatus.PENDING,
+                    ProcessingStatus.EXTRACTING,
+                    ProcessingStatus.CHUNKING,
+                    ProcessingStatus.INDEXING,
+                }
+                else "An identical document has already been processed."
+            ),
+            chunks_created=0,
         )
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"File type not supported. Allowed: {', '.join(settings.security.allowed_file_types)}",
+
+    # Use a deterministic UUID so repeated uploads of identical bytes map to
+    # the same search document keys even across DB resets/redeploys.
+    document_id = _deterministic_document_id(content_hash)
+
+    logger.info(
+        "document_upload_initiated",
+        document_id=str(document_id),
+        file_name=file.filename,
+        file_size_bytes=len(file_data),
+        content_hash_prefix=content_hash[:12],
+        user_id=current_user_id,
+        session_id=str(current_session.id),
+    )
+
+    # Create initial database record in PENDING state
+    doc_record = DocumentRecordORM(
+        id=document_id,
+        file_name=file.filename,
+        file_size_bytes=len(file_data),
+        content_type=file.content_type or "application/octet-stream",
+        uploaded_by_user_id=current_user_id,
+        blob_name=canonical_blob_name,
+        blob_url="",  # Will be populated by orchestrator
+        processing_status=ProcessingStatus.PENDING,
+    )
+    session.add(doc_record)
+    session.add(
+        UserDocumentAccessORM(
+            user_id=current_user_id,
+            document_id=document_id,
         )
+    )
+    current_session.active_document_id = document_id
 
     try:
-        # Generate unique document ID
-        document_id = str(uuid4())
-        
-        # Save file temporarily
-        temp_path = f"/tmp/{document_id}_{file.filename}"
-        with open(temp_path, "wb") as f:
-            f.write(file_content)
-        
-        # Process document
-        processor = DocumentProcessor()
-        processed_data = await processor.process_document(
-            file_path=temp_path,
-            file_name=file.filename,
-            document_id=document_id,
-        )
-        
-        # Chunk the document
-        chunker = RecursiveCharacterChunker(
-            chunk_size=settings.ai.chunk_size,
-            chunk_overlap=settings.ai.chunk_overlap,
-        )
-        chunks = chunker.chunk_text(processed_data["text"])
-        
-        # In production, would store chunks in search index here
-        chunk_count = len(chunks)
-        
-        # Clean up temp file
-        os.remove(temp_path)
-        
+        await session.commit()
+    except IntegrityError:
+        # Another concurrent upload likely inserted the same canonical blob first.
+        await session.rollback()
+        existing_doc = (await session.execute(existing_stmt)).scalar_one_or_none()
+        if not existing_doc:
+            raise
+
         logger.info(
-            "document_uploaded",
-            document_id=document_id,
-            file_name=file.filename,
-            chunk_count=chunk_count,
+            "document_upload_deduplicated_after_race",
+            existing_document_id=str(existing_doc.id),
+            existing_status=existing_doc.processing_status.value,
+            content_hash_prefix=content_hash[:12],
+            user_id=current_user_id,
+            session_id=str(current_session.id),
+            active_document_id=str(existing_doc.id),
         )
-        
+
+        await _ensure_document_access(session, current_user_id, existing_doc.id)
+        current_session.active_document_id = existing_doc.id
+
+        if existing_doc.processing_status == ProcessingStatus.FAILED:
+            if _is_non_retryable_failure(existing_doc.error_message):
+                await session.commit()
+                logger.info(
+                    "document_processing_requeue_skipped_non_retryable",
+                    document_id=str(existing_doc.id),
+                    error_preview=(existing_doc.error_message or "")[:120],
+                    user_id=current_user_id,
+                    session_id=str(current_session.id),
+                )
+                return DocumentUploadResponse(
+                    document_id=existing_doc.id,
+                    file_name=existing_doc.file_name,
+                    status=ProcessingStatus.FAILED.value,
+                    message=(
+                        "An identical failed document was found, but the failure "
+                        "appears non-retryable (unsupported/corrupted content). "
+                        "Reprocessing was not queued."
+                    ),
+                    chunks_created=0,
+                )
+
+            existing_doc.processing_status = ProcessingStatus.PENDING
+            existing_doc.error_message = None
+            existing_doc.completed_timestamp = None
+            await session.commit()
+
+            background_tasks.add_task(
+                orchestrator.run_pipeline,
+                document_id=existing_doc.id,
+                file_bytes=file_data,
+                file_name=existing_doc.file_name,
+                session_factory=async_session_maker,
+            )
+
+            logger.info(
+                "document_processing_requeued",
+                document_id=str(existing_doc.id),
+                user_id=current_user_id,
+                session_id=str(current_session.id),
+            )
+
+            return DocumentUploadResponse(
+                document_id=existing_doc.id,
+                file_name=existing_doc.file_name,
+                status="pending",
+                message=(
+                    "An identical failed document was found. "
+                    "Reprocessing has been queued."
+                ),
+                chunks_created=0,
+            )
+
+        await session.commit()
         return DocumentUploadResponse(
-            document_id=document_id,
-            file_name=file.filename,
-            status="processed",
-            message=f"Document processed successfully. {chunk_count} chunks created.",
-            chunks_created=chunk_count,
+            document_id=existing_doc.id,
+            file_name=existing_doc.file_name,
+            status=existing_doc.processing_status.value,
+            message=(
+                "An identical document is already being processed."
+                if existing_doc.processing_status
+                in {
+                    ProcessingStatus.PENDING,
+                    ProcessingStatus.EXTRACTING,
+                    ProcessingStatus.CHUNKING,
+                    ProcessingStatus.INDEXING,
+                }
+                else "An identical document has already been processed."
+            ),
+            chunks_created=0,
         )
-        
-    except Exception as e:
-        logger.error(
-            "document_processing_failed",
-            file_name=file.filename,
-            error=str(e),
+
+    logger.info(
+        "document_record_created",
+        document_id=str(document_id),
+        status="pending",
+        user_id=current_user_id,
+        session_id=str(current_session.id),
+    )
+
+    # Hand off to background task (returns immediately)
+    background_tasks.add_task(
+        orchestrator.run_pipeline,
+        document_id=document_id,
+        file_bytes=file_data,
+        file_name=file.filename,
+        session_factory=async_session_maker,
+    )
+
+    logger.info(
+        "document_processing_queued",
+        document_id=str(document_id),
+        user_id=current_user_id,
+        session_id=str(current_session.id),
+        active_document_id=str(current_session.active_document_id),
+    )
+
+    return DocumentUploadResponse(
+        document_id=document_id,
+        file_name=file.filename,
+        status="pending",
+        message="Document queued for processing. Check status via GET /{document_id}.",
+        chunks_created=0,
+    )
+
+
+@router.get(
+    "",
+    response_model=DocumentListResponse,
+)
+async def list_documents(
+    skip: int = 0,
+    limit: int = 20,
+    session: AsyncSession = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+) -> DocumentListResponse:
+    """
+    List all uploaded documents with pagination.
+
+    Returns documents sorted by upload_timestamp (newest first).
+    """
+    # Get total count
+    count_result = await session.execute(
+        select(func.count(UserDocumentAccessORM.document_id)).where(
+            UserDocumentAccessORM.user_id == current_user_id
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process document: {str(e)}",
+    )
+    total_count = count_result.scalar() or 0
+
+    # Get paginated documents
+    stmt = (
+        select(DocumentRecordORM)
+        .join(
+            UserDocumentAccessORM,
+            UserDocumentAccessORM.document_id == DocumentRecordORM.id,
         )
+        .where(UserDocumentAccessORM.user_id == current_user_id)
+        .order_by(DocumentRecordORM.upload_timestamp.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    doc_records = result.scalars().all()
+
+    documents = [
+        DocumentRecord(
+            document_id=doc.id,
+            file_name=doc.file_name,
+            file_size_bytes=doc.file_size_bytes,
+            upload_timestamp=doc.upload_timestamp,
+            page_count=doc.page_count,
+            processing_status=doc.processing_status.value,
+            uploaded_by_user_id=doc.uploaded_by_user_id,
+        )
+        for doc in doc_records
+    ]
+
+    logger.info(
+        "documents_listed",
+        skip=skip,
+        limit=limit,
+        total_count=total_count,
+        returned_count=len(documents),
+        user_id=current_user_id,
+    )
+
+    return DocumentListResponse(
+        documents=documents,
+        total_count=total_count,
+        skip=skip,
+        limit=limit,
+    )
 
 
 @router.get(
     "/{document_id}",
-    response_model=DocumentMetadata,
+    response_model=DocumentRecord,
 )
-async def get_document_metadata(
+async def get_document(
     document_id: str,
-    api_key: str = Depends(verify_api_key),
-) -> DocumentMetadata:
+    session: AsyncSession = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+) -> DocumentRecord:
     """
-    Get metadata for a specific document.
-    
-    Args:
-        document_id: The document ID
-        api_key: API key for authentication
-        
-    Returns:
-        Document metadata
-        
-    Raises:
-        HTTPException: If document not found
+    Retrieve metadata for a single document.
+
+    Returns document record including processing status, page count, and error
+    message (if processing failed).
     """
-    # In production, would fetch from database
-    # For now, return a placeholder
-    logger.info("get_document_metadata", document_id=document_id)
-    
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Document {document_id} not found",
+    # Try to parse as UUID
+    try:
+        from uuid import UUID
+        parsed_id = UUID(document_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid document ID format: {document_id}",
+        )
+
+    if not await _has_document_access(session, current_user_id, parsed_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    doc_record = await session.get(DocumentRecordORM, parsed_id)
+    if not doc_record:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    logger.info(
+        "document_retrieved",
+        document_id=document_id,
+        status=doc_record.processing_status.value,
+    )
+
+    return DocumentRecord(
+        document_id=doc_record.id,
+        file_name=doc_record.file_name,
+        file_size_bytes=doc_record.file_size_bytes,
+        upload_timestamp=doc_record.upload_timestamp,
+        page_count=doc_record.page_count,
+        processing_status=doc_record.processing_status.value,
+        uploaded_by_user_id=doc_record.uploaded_by_user_id,
     )
 
 
@@ -226,54 +570,117 @@ async def get_document_metadata(
 )
 async def delete_document(
     document_id: str,
-    api_key: str = Depends(verify_api_key),
+    session: AsyncSession = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+    current_session: UserSessionORM = Depends(get_current_session),
+    service: AbstractDocumentService = Depends(get_document_service),
+    search_service = Depends(get_search_service),
 ) -> None:
     """
-    Delete a document and its associated chunks.
-    
-    Args:
-        document_id: The document ID to delete
-        api_key: API key for authentication
-        
-    Returns:
-        None
-        
-    Raises:
-        HTTPException: If document not found
+    Delete a document and all associated data.
+
+    Cascading cleanup:
+    1. Delete chunks from search index
+    2. Delete chunks from database
+    3. Delete document metadata from database
+    4. Delete blob from storage
+
+    On partial failure, attempts to complete cleanup before propagating error.
     """
-    # In production, would delete from database and search index
-    logger.info("document_deleted", document_id=document_id)
-    
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Document {document_id} not found",
+    # Try to parse as UUID
+    try:
+        from uuid import UUID
+        parsed_id = UUID(document_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid document ID format: {document_id}",
+        )
+
+    # Validate ownership/access
+    access = (
+        await session.execute(
+            select(UserDocumentAccessORM).where(
+                UserDocumentAccessORM.user_id == current_user_id,
+                UserDocumentAccessORM.document_id == parsed_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if access is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    # Get document record
+    doc_record = await session.get(DocumentRecordORM, parsed_id)
+    if not doc_record:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {document_id} not found.",
+        )
+
+    logger.info(
+        "document_deletion_initiated",
+        document_id=document_id,
+        file_name=doc_record.file_name,
     )
 
+    # First, remove current user's access mapping.
+    await session.delete(access)
+    if current_session.active_document_id == parsed_id:
+        current_session.active_document_id = None
+    await session.flush()
 
-@router.get(
-    "",
-    response_model=DocumentListResponse,
-)
-async def list_documents(
-    api_key: str = Depends(verify_api_key),
-    skip: int = 0,
-    limit: int = 20,
-) -> DocumentListResponse:
-    """
-    List all uploaded documents with pagination.
-    
-    Args:
-        api_key: API key for authentication
-        skip: Number of documents to skip
-        limit: Maximum number of documents to return
-        
-    Returns:
-        List of documents with pagination info
-    """
-    logger.info("list_documents", skip=skip, limit=limit)
-    
-    # In production, would fetch from database
-    return DocumentListResponse(
-        documents=[],
-        total_count=0,
+    remaining_links = (
+        await session.execute(
+            select(func.count(UserDocumentAccessORM.user_id)).where(
+                UserDocumentAccessORM.document_id == parsed_id
+            )
+        )
+    ).scalar() or 0
+
+    # If other users still reference this document, stop at unlinking.
+    if remaining_links > 0:
+        await session.commit()
+        logger.info(
+            "document_access_removed_only",
+            document_id=document_id,
+            remaining_links=remaining_links,
+            user_id=current_user_id,
+        )
+        return
+
+    # Step 1: Delete from search index
+    try:
+        await search_service.delete_document_chunks(document_id)
+        logger.info("search_index_cleanup_completed", document_id=document_id)
+    except Exception as e:
+        logger.warning(
+            f"search_index_cleanup_failed: {type(e).__name__}",
+            document_id=document_id,
+            error_detail=str(e),
+        )
+
+    # Step 2: Delete blob from storage
+    try:
+        if doc_record.blob_name:
+            await service.delete_blob(doc_record.blob_name)
+            logger.info("blob_cleanup_completed", document_id=document_id, blob_name=doc_record.blob_name)
+    except Exception as e:
+        logger.warning(
+            f"blob_cleanup_failed: {type(e).__name__}",
+            document_id=document_id,
+            error_detail=str(e),
+        )
+
+    # Step 3: Delete database records (cascade deletes chunks via FK)
+    await session.delete(doc_record)
+    await session.commit()
+
+    logger.info(
+        "document_deletion_completed",
+        document_id=document_id,
+        file_name=doc_record.file_name,
     )
+

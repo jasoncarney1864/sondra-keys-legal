@@ -1,311 +1,118 @@
 """
-Q&A query endpoints for asking questions about uploaded documents.
-Uses semantic search and LLM to provide plain-English answers.
+Q&A query route: POST /api/query
 """
 
 import logging
-from typing import Optional
-from enum import Enum
 
-from fastapi import APIRouter, HTTPException, status, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.services.search_service import SearchService
-from backend.app.services.llm_service import LLMService
-from backend.app.core.config import settings
+from backend.app.api.dependencies import (
+    get_current_session,
+    get_current_user_id,
+    get_db_session,
+    get_query_service,
+)
+from backend.app.models.db import UserDocumentAccessORM, UserSessionORM
+from backend.app.models.schemas import QueryRequest, QueryResponse
+from backend.app.services.interfaces import AbstractQueryService
 
-logger = logging.getLogger(__name__)
+import structlog
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
 
-# ============================================================================
-# Enums
-# ============================================================================
-
-
-class SearchType(str, Enum):
-    """Search strategy type."""
-
-    SEMANTIC = "semantic"
-    FULL_TEXT = "full_text"
-    HYBRID = "hybrid"
-
-
-# ============================================================================
-# Pydantic Models
-# ============================================================================
-
-
-class QueryRequest(BaseModel):
-    """Request model for asking a question about a document."""
-
-    document_id: str = Field(
-        ...,
-        description="ID of the document to query",
-    )
-    question: str = Field(
-        ...,
-        description="Natural language question about the document",
-        min_length=3,
-        max_length=500,
-    )
-    search_type: SearchType = Field(
-        default=SearchType.HYBRID,
-        description="Type of search to use",
-    )
-    top_k: int = Field(
-        default=5,
-        description="Number of search results to use",
-        ge=1,
-        le=20,
-    )
-
-
-class SearchResult(BaseModel):
-    """A single search result."""
-
-    chunk_id: str
-    content: str
-    relevance_score: float
-
-
-class QueryResponse(BaseModel):
-    """Response model for Q&A query."""
-
-    question: str
-    answer: str
-    sources: list[SearchResult]
-    search_type: SearchType
-    confidence_score: float = Field(
-        default=0.8,
-        description="Confidence in the answer (0-1)",
-    )
-
-
-class TermExplanationRequest(BaseModel):
-    """Request model for explaining a legal term."""
-
-    term: str = Field(
-        ...,
-        description="The legal term to explain",
-        min_length=2,
-        max_length=100,
-    )
-    context: Optional[str] = Field(
-        None,
-        description="Optional context where the term appears",
-    )
-
-
-class TermExplanationResponse(BaseModel):
-    """Response model for term explanation."""
-
-    term: str
-    explanation: str
-
-
-# ============================================================================
-# Dependencies
-# ============================================================================
-
-
-async def verify_api_key(api_key: Optional[str] = None) -> None:
-    """
-    Verify API key from request header.
-    
-    Args:
-        api_key: API key from X-API-Key header
-        
-    Raises:
-        HTTPException: If API key is invalid
-    """
-    if api_key != settings.security.api_key:
-        logger.warning("Invalid API key attempt")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-        )
-
-
-# ============================================================================
-# Endpoints
-# ============================================================================
-
-
 @router.post(
-    "/ask",
+    "",
     response_model=QueryResponse,
     status_code=status.HTTP_200_OK,
+    summary="Answer a legal question using document context",
 )
-async def ask_question(
+async def query_documents(
     request: QueryRequest,
-    api_key: str = Depends(verify_api_key),
+    session: AsyncSession = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+    current_session: UserSessionORM = Depends(get_current_session),
+    query_service: AbstractQueryService = Depends(get_query_service),
 ) -> QueryResponse:
     """
-    Ask a question about a document.
-    
-    Returns a plain-English answer based on the document content,
-    using semantic search to find relevant sections and an LLM
-    to explain them in accessible language.
-    
-    Args:
-        request: Query request with document ID and question
-        api_key: API key for authentication
-        
-    Returns:
-        Answer with source chunks and confidence score
-        
+    Execute the full RAG pipeline against indexed document content.
+
+    Embeds the question, performs hybrid search, constructs a context-grounded
+    prompt, calls the LLM, and returns a structured answer with rich citations.
+
     Raises:
-        HTTPException: If document not found or processing fails
+        LLMRateLimitException (429): Upstream rate limit hit.
+        LLMServiceException (503): Upstream OpenAI API failure.
     """
-    try:
-        logger.info(
-            "ask_question",
-            document_id=request.document_id,
-            question=request.question[:50],
-            search_type=request.search_type,
-        )
-        
-        # Initialize services
-        search_service = SearchService()
-        llm_service = LLMService()
-        
-        # Search for relevant document chunks
-        if request.search_type == SearchType.SEMANTIC:
-            search_results = await search_service.search_semantic(
-                query=request.question,
-                top_k=request.top_k,
-                filters=f"document_id eq '{request.document_id}'",
-            )
-        elif request.search_type == SearchType.FULL_TEXT:
-            search_results = await search_service.search_full_text(
-                query=request.question,
-                top_k=request.top_k,
-                filters=f"document_id eq '{request.document_id}'",
-            )
-        else:  # HYBRID
-            search_results = await search_service.search_hybrid(
-                query=request.question,
-                top_k=request.top_k,
-                filters=f"document_id eq '{request.document_id}'",
-            )
-        
-        if not search_results:
-            logger.warning(
-                "no_search_results",
-                document_id=request.document_id,
-                question=request.question[:50],
-            )
+    logger.info(
+        "query_received",
+        question_preview=request.question[:80],
+        document_ids=[str(d) for d in request.document_ids] if request.document_ids else None,
+        top_k=request.top_k,
+        max_citations=request.max_citations,
+        user_id=current_user_id,
+        session_id=str(current_session.id),
+        active_document_id=(
+            str(current_session.active_document_id)
+            if current_session.active_document_id
+            else None
+        ),
+    )
+
+    effective_document_ids = request.document_ids
+    selection_source = "explicit"
+
+    if not effective_document_ids:
+        if current_session.active_document_id is None:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No relevant information found in document",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "No active document selected for this session. "
+                    "Select an active document first or pass document_ids explicitly."
+                ),
             )
-        
-        # Combine search results into context
-        document_context = "\n\n".join(
-            [f"[Section {i+1}]\n{result.content}"
-             for i, result in enumerate(search_results[:3])]
-        )
-        
-        # Generate answer
-        answer = await llm_service.answer_question(
-            question=request.question,
-            document_context=document_context,
-            document_title=request.document_id,
-        )
-        
-        # Convert search results to response format
-        sources = [
-            SearchResult(
-                chunk_id=result.chunk_id,
-                content=result.content[:200] + "..." if len(result.content) > 200 else result.content,
-                relevance_score=result.score,
-            )
-            for result in search_results
-        ]
-        
-        logger.info(
-            "question_answered",
-            document_id=request.document_id,
-            sources_count=len(sources),
-        )
-        
-        return QueryResponse(
-            question=request.question,
-            answer=answer,
-            sources=sources,
-            search_type=request.search_type,
-            confidence_score=min(1.0, sum(r.relevance_score for r in sources) / len(sources)),
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "question_processing_failed",
-            document_id=request.document_id,
-            error=str(e),
-            exc_info=True,
-        )
+        effective_document_ids = [current_session.active_document_id]
+        selection_source = "session_active_document"
+
+    allowed_ids_stmt = select(UserDocumentAccessORM.document_id).where(
+        UserDocumentAccessORM.user_id == current_user_id,
+        UserDocumentAccessORM.document_id.in_(effective_document_ids),
+    )
+    allowed_ids = {row[0] for row in (await session.execute(allowed_ids_stmt)).all()}
+
+    missing_ids = [doc_id for doc_id in effective_document_ids if doc_id not in allowed_ids]
+    if missing_ids:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process question: {str(e)}",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more requested documents are not available for this user.",
         )
 
+    scoped_document_ids = [doc_id for doc_id in effective_document_ids if doc_id in allowed_ids]
+    scoped_request = request.model_copy(update={"document_ids": scoped_document_ids})
 
-@router.post(
-    "/explain-term",
-    response_model=TermExplanationResponse,
-    status_code=status.HTTP_200_OK,
-)
-async def explain_term(
-    request: TermExplanationRequest,
-    api_key: str = Depends(verify_api_key),
-) -> TermExplanationResponse:
-    """
-    Get a plain-English explanation of a legal term.
-    
-    Args:
-        request: Term explanation request
-        api_key: API key for authentication
-        
-    Returns:
-        Plain-English explanation of the term
-        
-    Raises:
-        HTTPException: If explanation generation fails
-    """
-    try:
-        logger.info(
-            "explain_term",
-            term=request.term,
-        )
-        
-        llm_service = LLMService()
-        
-        explanation = await llm_service.explain_term(
-            term=request.term,
-            context=request.context,
-        )
-        
-        logger.info(
-            "term_explained",
-            term=request.term,
-        )
-        
-        return TermExplanationResponse(
-            term=request.term,
-            explanation=explanation,
-        )
-        
-    except Exception as e:
-        logger.error(
-            "term_explanation_failed",
-            term=request.term,
-            error=str(e),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to explain term: {str(e)}",
-        )
+    logger.info(
+        "query_scope_resolved",
+        user_id=current_user_id,
+        session_id=str(current_session.id),
+        active_document_id=(
+            str(current_session.active_document_id)
+            if current_session.active_document_id
+            else None
+        ),
+        selection_source=selection_source,
+        scoped_document_ids=[str(d) for d in scoped_document_ids],
+    )
+
+    response = await query_service.answer_query(scoped_request)
+
+    logger.info(
+        "query_completed",
+        citations_returned=len(response.citations),
+        model_used=response.model_used,
+        latency_ms=response.latency_ms,
+    )
+
+    return response

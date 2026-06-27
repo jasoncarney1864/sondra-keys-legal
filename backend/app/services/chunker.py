@@ -7,6 +7,8 @@ import logging
 from typing import List, Optional
 from dataclasses import dataclass
 
+from backend.app.models.schemas import AnalysisResultSchema, ChunkCreateSchema
+
 logger = logging.getLogger(__name__)
 
 # Separators ordered from most semantic to least semantic
@@ -102,6 +104,7 @@ class RecursiveCharacterChunker:
 
         # Merge splits into properly-sized chunks
         good_splits = self._merge_splits(splits)
+        good_splits = self._enforce_max_chunk_size(good_splits)
 
         # Convert to Chunk objects with metadata
         chunks = self._create_chunks(good_splits)
@@ -109,6 +112,73 @@ class RecursiveCharacterChunker:
         logger.info(
             f"Created {len(chunks)} chunks from text of {len(text)} characters"
         )
+        return chunks
+
+    def _enforce_max_chunk_size(self, splits: List[str]) -> List[str]:
+        """Guarantee no returned split exceeds configured chunk_size."""
+        enforced: List[str] = []
+
+        for split in splits:
+            if len(split) <= self.chunk_size:
+                enforced.append(split)
+                continue
+
+            start = 0
+            step = max(1, self.chunk_size - self.chunk_overlap)
+            while start < len(split):
+                part = split[start : start + self.chunk_size]
+                if part:
+                    enforced.append(part)
+                start += step
+
+        return enforced
+
+    def split_document(
+        self,
+        analysis_result: AnalysisResultSchema,
+    ) -> list[ChunkCreateSchema]:
+        """
+        Split an extracted document into indexable chunk schemas.
+
+        Args:
+            analysis_result: Document Intelligence extraction result.
+
+        Returns:
+            Contiguous, non-empty chunks tied to the source document.
+
+        Raises:
+            ValueError: If the extracted document text is empty.
+        """
+        text = analysis_result.text.strip()
+        if not text:
+            raise ValueError(
+                f"Document {analysis_result.document_id} has no extracted text to chunk"
+            )
+
+        section_title = (
+            analysis_result.structure.sections[0]
+            if analysis_result.structure.sections
+            else None
+        )
+
+        chunks = []
+        for chunk_index, chunk in enumerate(self.chunk_text(text)):
+            content = chunk.content.strip()
+            if not content:
+                continue
+
+            chunks.append(
+                ChunkCreateSchema(
+                    document_id=analysis_result.document_id,
+                    chunk_index=chunk_index,
+                    content=content,
+                    page_number=chunk.page_number,
+                    section_title=chunk.section_title or section_title,
+                    start_position=chunk.start_position,
+                    end_position=chunk.end_position,
+                )
+            )
+
         return chunks
 
     def _split_text(self, text: str, separators: List[str]) -> List[str]:

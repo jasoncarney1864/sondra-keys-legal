@@ -4,9 +4,9 @@ Uses Azure OpenAI to create embeddings for semantic search.
 """
 
 import logging
+import math
 from typing import List
-import numpy as np
-from openai import AsyncAzureOpenAI
+from openai import AsyncOpenAI
 
 from backend.app.core.config import settings
 
@@ -20,15 +20,11 @@ class EmbeddingService:
     """
 
     def __init__(self):
-        """Initialize the embedding service with Azure OpenAI client."""
-        self.client = AsyncAzureOpenAI(
-            api_key=settings.ai.openai_api_key,
-            api_version=settings.ai.openai_api_version,
-            azure_endpoint=str(settings.ai.openai_endpoint),
-        )
-        self.deployment_name = settings.ai.openai_deployment_name
-        self.embedding_model = "text-embedding-3-small"
+        """Initialize the embedding service with the OpenAI client."""
+        self.client = AsyncOpenAI(api_key=settings.openai.api_key)
+        self.embedding_model = settings.openai.embedding_model
         self.embedding_dimension = 1536
+        self.max_batch_size = 32
 
     async def embed_text(self, text: str) -> List[float]:
         """
@@ -82,19 +78,27 @@ class EmbeddingService:
             raise ValueError("Texts list cannot be empty")
 
         try:
-            logger.info(f"Embedding batch of {len(texts)} texts")
-            
-            response = await self.client.embeddings.create(
-                input=texts,
-                model=self.embedding_model,
+            logger.info(
+                "Embedding batch of %d texts (sub-batch size=%d)",
+                len(texts),
+                self.max_batch_size,
             )
-            
-            # Sort by index to maintain order
-            embeddings = sorted(response.data, key=lambda x: x.index)
-            embedding_list = [item.embedding for item in embeddings]
-            
-            logger.info(f"Generated {len(embedding_list)} embeddings")
-            
+
+            embedding_list: List[List[float]] = []
+
+            for i in range(0, len(texts), self.max_batch_size):
+                batch = texts[i : i + self.max_batch_size]
+                response = await self.client.embeddings.create(
+                    input=batch,
+                    model=self.embedding_model,
+                )
+
+                # Sort by index to maintain order within each sub-batch.
+                batch_embeddings = sorted(response.data, key=lambda x: x.index)
+                embedding_list.extend(item.embedding for item in batch_embeddings)
+
+            logger.info("Generated %d embeddings", len(embedding_list))
+
             return embedding_list
             
         except Exception as e:
@@ -122,14 +126,10 @@ class EmbeddingService:
                 f"Embedding dimensions must match: {len(embedding1)} vs {len(embedding2)}"
             )
 
-        # Convert to numpy arrays
-        vec1 = np.array(embedding1)
-        vec2 = np.array(embedding2)
-
-        # Compute cosine similarity
-        dot_product = np.dot(vec1, vec2)
-        magnitude1 = np.linalg.norm(vec1)
-        magnitude2 = np.linalg.norm(vec2)
+        # Compute cosine similarity using pure Python
+        dot_product = sum(a * b for a, b in zip(embedding1, embedding2))
+        magnitude1 = math.sqrt(sum(a * a for a in embedding1))
+        magnitude2 = math.sqrt(sum(b * b for b in embedding2))
 
         if magnitude1 == 0 or magnitude2 == 0:
             return 0.0

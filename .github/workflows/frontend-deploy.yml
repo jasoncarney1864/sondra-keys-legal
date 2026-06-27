@@ -46,10 +46,15 @@ jobs:
           cd frontend
           npm run lint
 
-      - name: Run tests
+      - name: Install Playwright browser
         run: |
           cd frontend
-          npm run test -- --coverage
+          npx playwright install --with-deps chromium
+
+      - name: Run integration tests
+        run: |
+          cd frontend
+          npm run test:e2e
 
       - name: Build
         run: |

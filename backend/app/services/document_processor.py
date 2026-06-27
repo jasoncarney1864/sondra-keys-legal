@@ -1,259 +1,488 @@
 """
-Document processing service using Azure Content Understanding.
-Handles extraction of text, structure, and metadata from uploaded documents.
+Document processing service using Azure Blob Storage and Document Intelligence.
+
+Implements the full document lifecycle:
+  1. Upload file to Azure Blob Storage
+  2. Extract metadata and text via Azure Document Intelligence
+  3. Return structured results ready for chunking/embedding
 """
 
-import logging
-import mimetypes
-from typing import Optional
-from datetime import datetime
 import json
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from typing import Optional
+from uuid import UUID
 
-import httpx
 from azure.core.credentials import AzureKeyCredential
-from azure.storage.blob import BlobClient
+from azure.core.exceptions import (
+    HttpResponseError,
+    ResourceExistsError,
+    ResourceNotFoundError,
+)
+from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
+from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+from azure.storage.blob.aio import ContainerClient
 
 from backend.app.core.config import settings
+from backend.app.core.exceptions import (
+    BlobUploadException,
+    BlobDeleteException,
+    BlobNotFoundException,
+    DocumentIntelligenceException,
+)
+from backend.app.models.schemas import (
+    BlobUploadResultSchema,
+    AnalysisResultSchema,
+    DocumentMetadataSchema,
+    DocumentStructureSchema,
+    DocumentHeadingSchema,
+)
+from backend.app.services.interfaces import AbstractDocumentService
+
 
 logger = logging.getLogger(__name__)
 
 
-class DocumentProcessor:
+class DocumentProcessor(AbstractDocumentService):
     """
-    Processes documents using Azure Content Understanding API.
-    Extracts text, metadata, and structure for downstream processing.
+    Production-ready document processor implementing the AbstractDocumentService contract.
+
+    Handles:
+      - Uploading file bytes to Azure Blob Storage
+      - Calling Azure Document Intelligence for structured extraction
+      - Mapping raw API responses to Pydantic schemas
+      - Defensive error handling with custom exception types
     """
 
     def __init__(self):
-        """Initialize the document processor with Azure credentials."""
-        self.endpoint = settings.azure.content_understanding_endpoint
-        self.api_key = settings.azure.content_understanding_key
-        self.api_version = "2024-11-01-preview"
-        self.headers = {
-            "api-key": self.api_key,
-            "Content-Type": "application/octet-stream"
-        }
+        """Initialize async Azure clients (lazy-loaded on first use)."""
+        # Changed the type hint here to ContainerClient
+        self._blob_container_client: Optional[ContainerClient] = None
+        self._doc_intel_client: Optional[DocumentIntelligenceClient] = None
+        self._initialized = False
 
-    async def process_document(
-        self,
-        file_path: str,
-        file_name: str,
-        document_id: str,
-    ) -> dict:
+    async def _ensure_initialized(self) -> None:
         """
-        Process a document using Azure Content Understanding.
+        Lazily initialize Azure clients on first use.
 
-        Args:
-            file_path: Local path to the document file
-            file_name: Original file name
-            document_id: Unique identifier for this document
-
-        Returns:
-            Dictionary containing processed document data:
-                - text: Extracted text content
-                - metadata: Document metadata (title, creation date, etc.)
-                - structure: Document structure (headings, sections)
-                - chunks: Pre-chunked content segments
-                - processing_timestamp: When the document was processed
-
-        Raises:
-            ValueError: If file type is not supported
-            httpx.HTTPError: If Azure API request fails
+        Connection is not established until this method is called, allowing
+        the app to boot even if Azure is momentarily unavailable.
         """
-        logger.info(f"Processing document: {file_name} (ID: {document_id})")
+        if self._initialized:
+            return
 
-        # Validate file type
-        self._validate_file_type(file_name)
+        try:
+            # Initialize Blob Container Client
+            account_url = (
+                f"https://{settings.azure.blob_account_name}.blob.core.windows.net"
+            )
+            self._blob_container_client = ContainerClient(
+                account_url=account_url,
+                container_name=settings.azure.blob_container_name,
+                credential=settings.azure.blob_account_key,
+            )
+            try:
+                await self._blob_container_client.create_container()
+                logger.info(
+                    "Created blob container: %s",
+                    settings.azure.blob_container_name,
+                )
+            except ResourceExistsError:
+                logger.debug(
+                    "Blob container already exists: %s",
+                    settings.azure.blob_container_name,
+                )
 
-        # Read file content
-        with open(file_path, "rb") as f:
-            file_content = f.read()
-
-        # Call Azure Content Understanding API
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            extraction_result = await self._call_content_understanding_api(
-                client, file_content, file_name
+            # Initialize Document Intelligence Client
+            self._doc_intel_client = DocumentIntelligenceClient(
+                endpoint=settings.azure.content_understanding_endpoint,
+                credential=AzureKeyCredential(settings.azure.content_understanding_key)
             )
 
-        # Parse and structure the results
-        processed_data = self._structure_extraction_result(
-            extraction_result, file_name, document_id
-        )
+            self._initialized = True
+            logger.info("Document processor clients initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Azure clients: {e}")
+            raise
 
-        logger.info(f"Successfully processed document: {file_name}")
-        return processed_data
+    # ────────────────────────────────────────────────────────────────────
+    # AbstractStorageService methods
+    # ────────────────────────────────────────────────────────────────────
 
-    async def _call_content_understanding_api(
-        self, client: httpx.AsyncClient, file_content: bytes, file_name: str
-    ) -> dict:
+    async def upload_to_blob(
+        self,
+        file_data: bytes,
+        file_name: str,
+        *,
+        content_type: str = "application/octet-stream",
+    ) -> BlobUploadResultSchema:
         """
-        Call the Azure Content Understanding API.
+        Upload raw bytes to Azure Blob Storage.
 
         Args:
-            client: AsyncClient for HTTP requests
-            file_content: Binary file content
-            file_name: Original file name
+            file_data: Binary file content.
+            file_name: Original file name (used as blob name).
+            content_type: MIME type of the file.
 
         Returns:
-            API response as dictionary
+            BlobUploadResultSchema with the canonical blob URL
+            and metadata.
+
+        Raises:
+            BlobUploadException: If the upload fails.
         """
-        url = (
-            f"{self.endpoint}/documentIntelligence:analyze"
-            f"?api-version={self.api_version}"
+        await self._ensure_initialized()
+
+        blob_name = file_name
+        logger.info(
+            f"Uploading blob: {blob_name} ({len(file_data)} bytes, "
+            f"content_type={content_type})"
         )
 
         try:
-            response = await client.post(
-                url,
-                content=file_content,
-                headers=self.headers,
-                params={"features": "layout,readingOrder,formulas"}
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Azure Content Understanding API error: {str(e)}")
-            raise
+            blob_client = self._blob_container_client.get_blob_client(blob_name)
 
-    def _validate_file_type(self, file_name: str) -> None:
+            # For deduplicated uploads, reuse the canonical blob if it already
+            # exists with the same size instead of overwriting it.
+            try:
+                props = await blob_client.get_blob_properties()
+                if props and props.size == len(file_data):
+                    blob_url = blob_client.url
+                    logger.info(
+                        "Blob already exists with matching size, reusing: %s",
+                        blob_name,
+                    )
+                    return BlobUploadResultSchema(
+                        blob_name=blob_name,
+                        blob_url=blob_url,
+                        content_type=content_type,
+                        size_bytes=len(file_data),
+                    )
+            except ResourceNotFoundError:
+                pass
+
+            await blob_client.upload_blob(
+                file_data,
+                overwrite=True,
+            )
+
+            # Construct canonical blob URL
+            blob_url = blob_client.url
+
+            logger.info(f"Successfully uploaded blob: {blob_name}")
+
+            return BlobUploadResultSchema(
+                blob_name=blob_name,
+                blob_url=blob_url,
+                content_type=content_type,
+                size_bytes=len(file_data),
+            )
+
+        except HttpResponseError as e:
+            logger.error(f"Blob upload failed: {e.status_code} {e.message}")
+            raise BlobUploadException(
+                f"Failed to upload blob '{file_name}' to Azure Storage",
+                detail=e.message,
+            ) from e
+        except Exception as e:
+            logger.error(f"Unexpected error during blob upload: {e}")
+            raise BlobUploadException(
+                f"Unexpected error uploading blob '{file_name}'",
+                detail=str(e),
+            ) from e
+
+    async def delete_blob(self, blob_name: str) -> None:
         """
-        Validate that the file type is supported.
+        Remove a blob from Azure Blob Storage by name.
 
         Args:
-            file_name: File name to validate
+            blob_name: Name of the blob to delete.
 
         Raises:
-            ValueError: If file type is not supported
+            BlobNotFoundException: If the blob does not exist.
+            BlobDeleteException: On other SDK or network failures.
         """
-        allowed_types = settings.security.allowed_file_types
-        _, ext = mimetypes.guess_extension(file_name), file_name.lower()
+        await self._ensure_initialized()
 
-        # Check by extension
-        if not any(ext.endswith(t) for t in allowed_types):
-            raise ValueError(
-                f"File type not supported. Allowed: {', '.join(allowed_types)}"
+        logger.info(f"Deleting blob: {blob_name}")
+
+        try:
+            blob_client = self._blob_container_client.get_blob_client(blob_name)
+            await blob_client.delete_blob()
+            logger.info(f"Successfully deleted blob: {blob_name}")
+
+        except ResourceNotFoundError as e:
+            logger.warning(f"Blob not found: {blob_name}")
+            raise BlobNotFoundException(
+                f"Blob '{blob_name}' does not exist in container "
+                f"'{settings.azure.blob_container_name}'",
+                detail=str(e),
+            ) from e
+        except HttpResponseError as e:
+            logger.error(f"Blob deletion failed: {e.status_code} {e.message}")
+            raise BlobDeleteException(
+                f"Failed to delete blob '{blob_name}' from Azure Storage",
+                detail=e.message,
+            ) from e
+        except Exception as e:
+            logger.error(f"Unexpected error deleting blob '{blob_name}': {e}")
+            raise BlobDeleteException(
+                f"Unexpected error deleting blob '{blob_name}'",
+                detail=str(e),
+            ) from e
+
+    async def get_blob_url(self, blob_name: str) -> str:
+        """
+        Return a pre-authenticated URL for a stored blob.
+
+        Generates a short-lived read SAS so Azure Document Intelligence can
+        fetch private blobs during asynchronous analysis.
+
+        Args:
+            blob_name: Name of the blob.
+
+        Returns:
+            Canonical HTTPS URL to the blob.
+        """
+        await self._ensure_initialized()
+        blob_client = self._blob_container_client.get_blob_client(blob_name)
+        sas_token = generate_blob_sas(
+            account_name=settings.azure.blob_account_name,
+            container_name=settings.azure.blob_container_name,
+            blob_name=blob_name,
+            account_key=settings.azure.blob_account_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        return f"{blob_client.url}?{sas_token}"
+
+    async def load_parsed_json(self, blob_name: str) -> dict[str, Any] | None:
+        """Load parsed-document JSON cache from blob storage."""
+        await self._ensure_initialized()
+        blob_client = self._blob_container_client.get_blob_client(blob_name)
+
+        try:
+            data = await blob_client.download_blob()
+            raw_bytes = await data.readall()
+            return json.loads(raw_bytes.decode("utf-8"))
+        except ResourceNotFoundError:
+            return None
+
+    async def save_parsed_json(
+        self,
+        blob_name: str,
+        payload: dict[str, Any],
+    ) -> str:
+        """Persist parsed-document JSON cache to blob storage."""
+        await self._ensure_initialized()
+        blob_client = self._blob_container_client.get_blob_client(blob_name)
+        await blob_client.upload_blob(
+            json.dumps(payload).encode("utf-8"),
+            overwrite=True,
+            content_type="application/json",
+        )
+        return blob_name
+
+    # ────────────────────────────────────────────────────────────────────
+    # AbstractExtractionService methods
+    # ────────────────────────────────────────────────────────────────────
+
+    async def extract_metadata_with_doc_intel(
+        self,
+        blob_url: str,
+        *,
+        document_id: str,
+    ) -> AnalysisResultSchema:
+        """
+        Submit a blob URL to Azure Document Intelligence and return
+        structured extraction results.
+
+        The Document Intelligence service analyzes the document at the
+        blob URL and returns layout, text, tables, key-value pairs, etc.
+
+        Args:
+            blob_url: HTTPS URL to the document blob (from upload_to_blob).
+            document_id: Unique identifier for this document.
+
+        Returns:
+            AnalysisResultSchema with extracted text, metadata, and structure.
+
+        Raises:
+            DocumentIntelligenceException: If the API call fails or times out.
+        """
+        await self._ensure_initialized()
+
+        logger.info(
+            f"Submitting document for extraction: document_id={document_id}, "
+            f"blob_url={blob_url}"
+        )
+
+        try:
+            # Call Document Intelligence API with the blob URL
+            poller = await self._doc_intel_client.begin_analyze_document(
+                model_id="prebuilt-layout",
+                body=AnalyzeDocumentRequest(url_source=blob_url),
             )
 
-    def _structure_extraction_result(
-        self, extraction_result: dict, file_name: str, document_id: str
-    ) -> dict:
+            # Poll for completion (Document Intelligence uses long-running operations)
+            result = await poller.result()
+            raw_result = result.as_dict() if hasattr(result, "as_dict") else result
+
+            logger.info(
+                f"Document extraction completed: document_id={document_id}"
+            )
+
+            # Map raw API response to AnalysisResultSchema
+            doc_id = (
+                UUID(document_id) 
+                if isinstance(document_id, str) 
+                else document_id
+            )
+            return self._map_to_analysis_result(raw_result, document_id=doc_id)
+
+        except HttpResponseError as e:
+            logger.error(
+                f"Document Intelligence API error: {e.status_code} {e.message}"
+            )
+            raise DocumentIntelligenceException(
+                f"Document Intelligence API call failed for document_id={document_id}",
+                detail=e.message,
+            ) from e
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during document extraction: {e}"
+            )
+            raise DocumentIntelligenceException(
+                f"Unexpected error extracting document_id={document_id}",
+                detail=str(e),
+            ) from e
+
+    # ────────────────────────────────────────────────────────────────────
+    # Internal helpers for response mapping
+    # ────────────────────────────────────────────────────────────────────
+
+    def _map_to_analysis_result(
+        self,
+        raw_result: dict,
+        document_id: UUID,
+    ) -> AnalysisResultSchema:
         """
-        Structure the raw API response into a standardized format.
+        Map Azure Document Intelligence API response to AnalysisResultSchema.
 
         Args:
-            extraction_result: Raw API response
-            file_name: Original file name
-            document_id: Document identifier
+            raw_result: Raw response dict from DocumentIntelligenceClient.
+            document_id: UUID to attach to the result.
 
         Returns:
-            Structured document data
+            AnalysisResultSchema ready for downstream processing.
         """
-        # Extract text from content items
-        text_content = self._extract_text_from_content(extraction_result)
+        text = self._extract_text(raw_result)
+        metadata = self._extract_metadata(raw_result)
+        structure = self._extract_structure(raw_result)
 
-        # Extract metadata
-        metadata = self._extract_metadata(extraction_result, file_name)
+        return AnalysisResultSchema(
+            document_id=document_id,
+            file_name=metadata.file_name,
+            text=text,
+            metadata=metadata,
+            structure=structure,
+            raw_extraction=raw_result,
+        )
 
-        # Extract document structure (headings, sections)
-        structure = self._extract_structure(extraction_result)
-
-        return {
-            "document_id": document_id,
-            "file_name": file_name,
-            "text": text_content,
-            "metadata": metadata,
-            "structure": structure,
-            "processing_timestamp": datetime.utcnow().isoformat(),
-            "raw_extraction": extraction_result  # Store for debugging
-        }
-
-    def _extract_text_from_content(self, extraction_result: dict) -> str:
+    def _extract_text(self, raw_result: dict) -> str:
         """
-        Extract readable text from the content items in the API response.
+        Extract concatenated plain-text from Document Intelligence response.
+
+        Prioritizes `content` field from the top-level response.
+        Falls back to concatenating paragraphs if available.
 
         Args:
-            extraction_result: API response
+            raw_result: Raw API response dict.
 
         Returns:
-            Concatenated text content
+            Concatenated plain text.
         """
+        # Try top-level content first
+        if "content" in raw_result:
+            return raw_result["content"]
+
+        # Fall back to paragraphs if present
         text_parts = []
+        if "pages" in raw_result:
+            for page in raw_result["pages"]:
+                if "lines" in page:
+                    for line in page["lines"]:
+                        if "content" in line:
+                            text_parts.append(line["content"])
 
-        # Extract from analyzed_document.content
-        if "analyzeResult" in extraction_result:
-            analyze_result = extraction_result["analyzeResult"]
+        return "\n\n".join(text_parts) if text_parts else ""
 
-            if "content" in analyze_result:
-                text_parts.append(analyze_result["content"])
-
-            # If paragraphs are available, use them for cleaner structure
-            if "paragraphs" in analyze_result:
-                for paragraph in analyze_result["paragraphs"]:
-                    if "content" in paragraph:
-                        text_parts.append(paragraph["content"])
-
-        return "\n\n".join(text_parts)
-
-    def _extract_metadata(self, extraction_result: dict, file_name: str) -> dict:
+    def _extract_metadata(self, raw_result: dict) -> DocumentMetadataSchema:
         """
-        Extract document metadata.
+        Extract document-level metadata from the API response.
 
         Args:
-            extraction_result: API response
-            file_name: Original file name
+            raw_result: Raw API response dict.
 
         Returns:
-            Metadata dictionary
+            DocumentMetadataSchema instance.
         """
-        metadata = {
-            "file_name": file_name,
-            "extraction_date": datetime.utcnow().isoformat(),
-        }
+        file_name = raw_result.get("analyzeResult", {}).get("apiVersion", "document")
+        page_count = None
+        document_type = None
 
-        # Extract document-level properties if available
-        if "analyzeResult" in extraction_result:
-            analyze_result = extraction_result["analyzeResult"]
+        # Extract page count from pages array
+        if "pages" in raw_result:
+            page_count = len(raw_result["pages"])
 
-            # Page count
-            if "pages" in analyze_result:
-                metadata["page_count"] = len(analyze_result["pages"])
+        # Try to detect document type
+        if "analyzeResult" in raw_result:
+            analyze_result = raw_result["analyzeResult"]
+            document_type = analyze_result.get("documentType")
 
-            # Document type detection
-            if "documentType" in analyze_result:
-                metadata["document_type"] = analyze_result["documentType"]
+        return DocumentMetadataSchema(
+            file_name=file_name,
+            page_count=page_count,
+            document_type=document_type,
+            extraction_date=datetime.utcnow(),
+        )
 
-        return metadata
-
-    def _extract_structure(self, extraction_result: dict) -> dict:
+    def _extract_structure(self, raw_result: dict) -> DocumentStructureSchema:
         """
         Extract document structure (headings, sections, etc.).
 
         Args:
-            extraction_result: API response
+            raw_result: Raw API response dict.
 
         Returns:
-            Structure information
+            DocumentStructureSchema instance.
         """
-        structure = {
-            "sections": [],
-            "headings": []
-        }
+        headings: list[DocumentHeadingSchema] = []
+        sections: list[str] = []
 
-        if "analyzeResult" not in extraction_result:
-            return structure
+        if "pages" not in raw_result:
+            return DocumentStructureSchema(headings=headings, sections=sections)
 
-        analyze_result = extraction_result["analyzeResult"]
+        # Extract structure from paragraphs if present
+        for page in raw_result.get("pages", []):
+            for para in page.get("paragraphs", []):
+                role = para.get("role", "")
 
-        # Extract headings from paragraphs if role is available
-        if "paragraphs" in analyze_result:
-            for paragraph in analyze_result["paragraphs"]:
-                role = paragraph.get("role", "")
+                # Capture headings
+                if role.startswith("title") or role.startswith("heading"):
+                    level = role.split(":")[-1] if ":" in role else "1"
+                    headings.append(
+                        DocumentHeadingSchema(
+                            text=para.get("content", ""),
+                            level=level,
+                            confidence=para.get("confidence", 1.0),
+                        )
+                    )
 
-                if "heading" in role.lower():
-                    structure["headings"].append({
-                        "text": paragraph.get("content", ""),
-                        "level": role,
-                        "confidence": paragraph.get("confidence", 1.0)
-                    })
+                # Capture section markers
+                if role == "sectionHeading":
+                    sections.append(para.get("content", ""))
 
-        return structure
+        return DocumentStructureSchema(headings=headings, sections=sections)

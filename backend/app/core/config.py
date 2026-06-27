@@ -107,12 +107,62 @@ class AISettings(BaseSettings):
         case_sensitive = False
 
 
+class OpenAISettings(BaseSettings):
+    """Standard (non-Azure) OpenAI configuration used for embeddings."""
+
+    api_key: str = Field(
+        ...,
+        description="OpenAI API key used for embedding generation"
+    )
+    embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description="OpenAI embedding model name"
+    )
+    chat_model: str = Field(
+        default="gpt-4o",
+        description="OpenAI chat model name used for answer generation"
+    )
+
+    class Config:
+        env_prefix = "OPENAI_"
+        case_sensitive = False
+
+
 class SecuritySettings(BaseSettings):
     """Security configuration."""
+
+    auth_mode: str = Field(
+        default="api_key",
+        description="Authentication mode: api_key or oidc"
+    )
 
     api_key: str = Field(
         ..., 
         description="API key for protecting endpoints"
+    )
+    default_dev_user_id: str = Field(
+        default="local-dev-user",
+        description="Fallback user identity when auth_mode=api_key"
+    )
+    oidc_issuer: str | None = Field(
+        default=None,
+        description="OIDC token issuer URL"
+    )
+    oidc_audience: str | None = Field(
+        default=None,
+        description="OIDC expected audience value"
+    )
+    oidc_jwks_url: str | None = Field(
+        default=None,
+        description="OIDC JWKS endpoint URL"
+    )
+    oidc_user_id_claim: str = Field(
+        default="sub",
+        description="Claim name used as stable user identifier"
+    )
+    oidc_algorithms: list[str] = Field(
+        default_factory=lambda: ["RS256"],
+        description="Allowed JWT signature algorithms"
     )
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:8000"],
@@ -126,6 +176,15 @@ class SecuritySettings(BaseSettings):
         default=[".pdf", ".docx", ".doc", ".txt"],
         description="Allowed file types for upload"
     )
+
+    @field_validator("auth_mode")
+    @classmethod
+    def validate_auth_mode(cls, v: str) -> str:
+        """Validate configured authentication mode."""
+        valid_modes = {"api_key", "oidc"}
+        if v not in valid_modes:
+            raise ValueError(f"auth_mode must be one of {valid_modes}")
+        return v
 
     class Config:
         env_prefix = "SECURITY_"
@@ -169,11 +228,74 @@ class Settings(BaseSettings):
         default="development",
         description="Environment (development, staging, production)"
     )
+    startup_index_sanity_check_enabled: bool = Field(
+        default=True,
+        description="Enable startup index duplicate-identity sanity checks"
+    )
+    startup_index_sanity_auto_cleanup_duplicates: bool = Field(
+        default=False,
+        description=(
+            "Automatically remove duplicate index document_ids when the "
+            "canonical ID is deterministic (UUIDv5)"
+        )
+    )
+    startup_index_sanity_page_size: int = Field(
+        default=1000,
+        ge=100,
+        le=1000,
+        description="Page size for startup index sanity scans"
+    )
+    user_session_ttl_minutes: int = Field(
+        default=10080,
+        ge=60,
+        le=43200,
+        description="TTL for user sessions in minutes"
+    )
+    user_session_retention_cleanup_enabled: bool = Field(
+        default=True,
+        description="Run startup cleanup for expired user sessions"
+    )
+    user_session_retention_grace_minutes: int = Field(
+        default=60,
+        ge=0,
+        le=10080,
+        description="Extra grace window before deleting expired sessions"
+    )
+    parsed_json_cache_enabled: bool = Field(
+        default=True,
+        description="Enable parsed PDF JSON caching in blob storage"
+    )
+    parsed_json_cache_prefix: str = Field(
+        default="parsed",
+        description="Blob prefix used for cached parsed document JSON"
+    )
+    parsed_json_cache_parser_version: str = Field(
+        default="prebuilt-layout-v1",
+        description="Parser version tag stored with cached parsed JSON"
+    )
+    parsed_json_retention_cleanup_enabled: bool = Field(
+        default=True,
+        description="Run startup cleanup hook for stale parsed JSON cache references"
+    )
+    parsed_json_retention_days: int = Field(
+        default=90,
+        ge=1,
+        le=3650,
+        description="Age threshold in days for parsed JSON cache cleanup consideration"
+    )
+    parsed_json_retention_delete_blobs: bool = Field(
+        default=False,
+        description=(
+            "When true, startup retention cleanup deletes stale parsed JSON blobs "
+            "from storage and clears DB pointers"
+        )
+    )
 
     # Sub-configurations
     azure: AzureSettings = Field(default_factory=AzureSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     ai: AISettings = Field(default_factory=AISettings)
+    openai: OpenAISettings = Field(default_factory=OpenAISettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 

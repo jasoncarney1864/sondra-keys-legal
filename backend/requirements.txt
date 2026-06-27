@@ -9,7 +9,7 @@ pydantic-settings==2.2.0
 # Azure SDK packages
 azure-storage-blob==12.20.0
 azure-search-documents==11.4.0
-azure-identity==1.14.0
+azure-identity==1.17.1
 azure-ai-documentintelligence==1.0.0
 openai==1.8.0
 
@@ -21,26 +21,30 @@ requests==2.31.0
 sqlalchemy==2.0.25
 alembic==1.13.1
 psycopg2-binary==2.9.9  # PostgreSQL adapter
+aiosqlite==0.20.0
+aiohttp>=3.9.0
 
 # Data validation and parsing
 python-multipart==0.0.6
 
 # Logging and monitoring
 python-json-logger==2.0.7
-opentelemetry-api==1.21.0
-opentelemetry-sdk==1.21.0
-opentelemetry-instrumentation-fastapi==0.42b0
-opentelemetry-instrumentation-sqlalchemy==0.42b0
-opentelemetry-exporter-azure-monitor==1.1.0
+# OpenTelemetry (Managed automatically by the Azure Monitor Distro below)
+# opentelemetry-api==1.21.0
+# opentelemetry-sdk==1.21.0
+# opentelemetry-instrumentation-fastapi==0.42b0
+# opentelemetry-instrumentation-sqlalchemy==0.42b0
+
+azure-monitor-opentelemetry==1.8.0
 
 # Security and authentication
-PyJWT==2.8.1
+PyJWT==2.13.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 cryptography==41.0.7
 
 # Async utilities
-asyncio-contextmanager==1.0.0
+asyncio-contextmanager==1.0.1
 
 # Testing
 pytest==7.4.3

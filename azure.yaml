@@ -1,0 +1,13 @@
+name: sondra-keys-legal
+metadata:
+  template: sondra-keys-legal-frontend-swa@0.0.1-beta
+
+infra:
+  provider: bicep
+  path: deploy/infra-swa
+
+services:
+  web:
+    project: ./frontend
+    language: ts
+    host: staticwebapp
