@@ -34,6 +34,7 @@ from backend.app.models.schemas import SessionCreateResponse
 from backend.app.services.document_processor import DocumentProcessor
 from backend.app.services.interfaces import AbstractDocumentService, AbstractQueryService, AbstractSearchService
 from backend.app.services.orchestrator import DocumentPipelineOrchestrator
+from backend.app.services.hud_sources import HUDCuratedSourceAdapter, HUDIngestionService
 
 logger = logging.getLogger(__name__)
 
@@ -390,5 +391,28 @@ def get_query_service() -> AbstractQueryService:
         app.dependency_overrides[get_query_service] = lambda: MockQueryService()
     """
     return _create_query_service()
+
+
+# ---------------------------------------------------------------------------
+# HUD ingestion service
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _create_hud_source_adapter() -> HUDCuratedSourceAdapter:
+    """Construct the HUD source adapter once per worker process."""
+    return HUDCuratedSourceAdapter()
+
+
+def get_hud_ingestion_service(
+    search_service: AbstractSearchService = Depends(get_search_service),
+    chunker=Depends(get_chunker),
+) -> HUDIngestionService:
+    """Inject HUD ingestion coordinator for source sync/list routes."""
+    return HUDIngestionService(
+        source_adapter=_create_hud_source_adapter(),
+        search_service=search_service,
+        chunker=chunker,
+    )
 
 

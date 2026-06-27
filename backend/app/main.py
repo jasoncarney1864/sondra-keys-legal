@@ -22,7 +22,7 @@ import structlog
 
 from backend.app.core.config import settings
 from backend.app.core.database import async_session_maker, get_engine, init_db
-from backend.app.api.routes import documents, query, health, sessions
+from backend.app.api.routes import documents, query, health, hud, sessions
 from backend.app.core.exception_handlers import (
     blob_not_found_handler,
     document_validation_handler,
@@ -637,6 +637,13 @@ app.include_router(
     sessions.router,
     prefix="/api/sessions",
     tags=["sessions"],
+)
+
+# HUD sources and sync
+app.include_router(
+    hud.router,
+    prefix="/api/hud",
+    tags=["hud"],
 )
 
 # Q&A queries

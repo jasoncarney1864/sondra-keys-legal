@@ -112,6 +112,38 @@ class DocumentListResponse(BaseModel):
     limit: int
 
 
+class HUDSourceRecord(BaseModel):
+    """Single HUD source entry available for HUD Ask scope."""
+
+    source_id: str
+    document_id: UUID
+    title: str
+    source_url: HttpUrl
+    regulation_id: str
+    effective_date: str | None = None
+    processing_status: str
+    operation: str = "existing"
+    last_synced_at: datetime
+
+
+class HUDSourceListResponse(BaseModel):
+    """Returned from GET /api/hud/sources."""
+
+    sources: list[HUDSourceRecord]
+    total_count: int
+
+
+class HUDSyncResponse(BaseModel):
+    """Returned from POST /api/hud/sync."""
+
+    ingested_count: int
+    updated_count: int
+    skipped_count: int
+    failed_count: int
+    sources: list[HUDSourceRecord]
+    strategy_note: str
+
+
 class QueryRequest(BaseModel):
     """Payload for POST /api/query."""
 

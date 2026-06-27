@@ -208,6 +208,49 @@ class LoggingSettings(BaseSettings):
         case_sensitive = False
 
 
+class HUDSettings(BaseSettings):
+    """HUD source ingestion and discovery configuration."""
+
+    sync_enabled: bool = Field(
+        default=True,
+        description="Enable HUD source synchronization endpoints"
+    )
+    source_state_path: str = Field(
+        default="/workspace/data/hud_source_state.json",
+        description="Path to persisted HUD ingestion state JSON file"
+    )
+    enable_live_fetch: bool = Field(
+        default=True,
+        description="Fetch live HUD source pages before falling back to bundled excerpts"
+    )
+    fetch_timeout_seconds: int = Field(
+        default=20,
+        ge=5,
+        le=120,
+        description="HTTP timeout for HUD source fetches"
+    )
+    fetch_max_retries: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum retry attempts for HUD source fetches"
+    )
+    fetch_backoff_seconds: float = Field(
+        default=1.5,
+        ge=0.1,
+        le=30.0,
+        description="Base retry backoff used for HUD source fetches"
+    )
+    user_api_token: str | None = Field(
+        default=None,
+        description="Optional HUD User API bearer token for dataset calls"
+    )
+
+    class Config:
+        env_prefix = "HUD_"
+        case_sensitive = False
+
+
 class Settings(BaseSettings):
     """Main application settings combining all sub-settings."""
 
@@ -298,6 +341,7 @@ class Settings(BaseSettings):
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    hud: HUDSettings = Field(default_factory=HUDSettings)
 
     @field_validator("environment")
     @classmethod
