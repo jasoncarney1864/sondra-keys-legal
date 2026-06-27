@@ -3,28 +3,27 @@ import type { FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
-  clearActiveDocument,
+  deleteDocument,
+  downloadDocument,
+  getDocumentDownloadUrl,
   listDocuments,
-  setActiveDocument,
   uploadDocument,
 } from '../lib/api/client'
-import type { DocumentRecord } from '../lib/api/types'
 import { formatDateTime, formatFileSize } from '../lib/format'
 
 type DocumentsPageProps = {
   sessionId: string | null
-  activeDocumentId: string | null
-  onSessionChanged: () => Promise<void> | void
+  currentUserId: string | null
 }
 
-export function DocumentsPage({
-  sessionId,
-  activeDocumentId,
-  onSessionChanged,
-}: DocumentsPageProps) {
+export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) {
   const [file, setFile] = useState<File | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [documentPendingDelete, setDocumentPendingDelete] = useState<{
+    documentId: string
+    fileName: string
+  } | null>(null)
   const queryClient = useQueryClient()
 
   const documentsQuery = useQuery({
@@ -56,7 +55,6 @@ export function DocumentsPage({
       setError(null)
       setFile(null)
       await queryClient.invalidateQueries({ queryKey: ['documents'] })
-      await onSessionChanged()
     },
     onError: (mutationError: Error) => {
       setError(mutationError.message)
@@ -64,17 +62,47 @@ export function DocumentsPage({
     },
   })
 
-  const setActiveMutation = useMutation({
+  const downloadMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!sessionId) {
-        throw new Error('A session is required before selecting an active document.')
+      try {
+        const direct = await downloadDocument(documentId)
+        return {
+          mode: 'blob' as const,
+          fileName: direct.fileName,
+          blob: direct.blob,
+        }
+      } catch {
+        const fallback = await getDocumentDownloadUrl(documentId)
+        return {
+          mode: 'url' as const,
+          fileName: fallback.file_name,
+          downloadUrl: fallback.download_url,
+        }
       }
-      return setActiveDocument(sessionId, documentId)
     },
-    onSuccess: async () => {
+    onSuccess: (payload) => {
       setError(null)
-      setMessage('Active document updated for current session.')
-      await onSessionChanged()
+
+      if (payload.mode === 'blob') {
+        setMessage(`Starting download for '${payload.fileName}'.`)
+
+        const objectUrl = window.URL.createObjectURL(payload.blob)
+        const anchor = window.document.createElement('a')
+        anchor.href = objectUrl
+        anchor.download = payload.fileName
+        window.document.body.append(anchor)
+        anchor.click()
+        anchor.remove()
+
+        // Delay revocation so browsers have enough time to begin download.
+        window.setTimeout(() => {
+          window.URL.revokeObjectURL(objectUrl)
+        }, 2_000)
+        return
+      }
+
+      setMessage(`Starting download for '${payload.fileName}' via signed URL.`)
+      window.location.assign(payload.downloadUrl)
     },
     onError: (mutationError: Error) => {
       setError(mutationError.message)
@@ -82,17 +110,19 @@ export function DocumentsPage({
     },
   })
 
-  const clearActiveMutation = useMutation({
-    mutationFn: async () => {
-      if (!sessionId) {
-        throw new Error('A session is required before clearing active document.')
-      }
-      return clearActiveDocument(sessionId)
-    },
-    onSuccess: async () => {
+  const deleteMutation = useMutation({
+    mutationFn: async (documentId: string) => deleteDocument(documentId),
+    onSuccess: async (_, documentId) => {
       setError(null)
-      setMessage('Active document cleared.')
-      await onSessionChanged()
+      setDocumentPendingDelete(null)
+      setMessage(
+        `Document deleted. Linked artifacts were removed and any active selection for document ${documentId.slice(0, 8)} was cleared.`,
+      )
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['documents'] }),
+        queryClient.invalidateQueries({ queryKey: ['documents', 'for-query'] }),
+        queryClient.invalidateQueries({ queryKey: ['session-current'] }),
+      ])
     },
     onError: (mutationError: Error) => {
       setError(mutationError.message)
@@ -125,7 +155,7 @@ export function DocumentsPage({
           <p className="eyebrow">Pipeline</p>
           <h2>Documents</h2>
           <p className="muted">
-            Upload, monitor processing state, and control session-level active document.
+            Upload files and monitor processing status for explicit document scope in Ask.
           </p>
         </div>
       </header>
@@ -146,14 +176,6 @@ export function DocumentsPage({
             className="primary"
           >
             {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
-          </button>
-          <button
-            type="button"
-            onClick={() => clearActiveMutation.mutate()}
-            disabled={!sessionId || clearActiveMutation.isPending}
-            className="ghost"
-          >
-            Clear active document
           </button>
         </form>
 
@@ -180,7 +202,17 @@ export function DocumentsPage({
         ) : null}
 
         {sortedDocuments.length === 0 ? (
-          <p className="muted">No documents found yet.</p>
+          <div className="stack-form">
+            <p className="muted">No documents found in Known documents.</p>
+            {sessionId ? (
+              <p className="muted">
+                Current user context: <span className="mono">{currentUserId ?? 'resolving-user'}</span>.
+                Upload a file in this session to create a user-linked record.
+              </p>
+            ) : (
+              <p className="muted">Select or create a session first, then upload to populate this grid.</p>
+            )}
+          </div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -198,9 +230,12 @@ export function DocumentsPage({
                   <DocumentRow
                     key={document.document_id}
                     document={document}
-                    isActive={document.document_id === activeDocumentId}
-                    onSetActive={(documentId) => setActiveMutation.mutate(documentId)}
-                    isBusy={setActiveMutation.isPending}
+                    onDownload={(documentId) => downloadMutation.mutate(documentId)}
+                    isDownloading={downloadMutation.isPending}
+                    onDelete={(documentId, fileName) => {
+                      setDocumentPendingDelete({ documentId, fileName })
+                    }}
+                    isDeleting={deleteMutation.isPending}
                   />
                 ))}
               </tbody>
@@ -208,18 +243,55 @@ export function DocumentsPage({
           </div>
         )}
       </div>
+
+      {documentPendingDelete ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-card" role="dialog" aria-modal="true" aria-label="Delete document">
+            <h3>Delete document permanently?</h3>
+            <p className="muted">
+              This will remove the row and all linked artifacts (chunks, index entries, and stored files)
+              for <strong>{documentPendingDelete.fileName}</strong>. This action cannot be undone.
+            </p>
+            <div className="row-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setDocumentPendingDelete(null)}
+                disabled={deleteMutation.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => deleteMutation.mutate(documentPendingDelete.documentId)}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? 'Deleting...' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
 
 type DocumentRowProps = {
-  document: DocumentRecord
-  isActive: boolean
-  isBusy: boolean
-  onSetActive: (documentId: string) => void
+  document: {
+    document_id: string
+    file_name: string
+    file_size_bytes: number
+    upload_timestamp: string
+    processing_status: string
+  }
+  isDownloading: boolean
+  isDeleting: boolean
+  onDownload: (documentId: string) => void
+  onDelete: (documentId: string, fileName: string) => void
 }
 
-function DocumentRow({ document, isActive, isBusy, onSetActive }: DocumentRowProps) {
+function DocumentRow({ document, isDownloading, isDeleting, onDownload, onDelete }: DocumentRowProps) {
   return (
     <tr>
       <td>
@@ -233,14 +305,24 @@ function DocumentRow({ document, isActive, isBusy, onSetActive }: DocumentRowPro
       <td>{formatFileSize(document.file_size_bytes)}</td>
       <td>{formatDateTime(document.upload_timestamp)}</td>
       <td>
-        <button
-          type="button"
-          className={isActive ? 'primary' : 'ghost'}
-          disabled={isBusy}
-          onClick={() => onSetActive(document.document_id)}
-        >
-          {isActive ? 'Active' : 'Set active'}
-        </button>
+        <div className="row-actions">
+          <button
+            type="button"
+            className="ghost"
+            disabled={isDownloading}
+            onClick={() => onDownload(document.document_id)}
+          >
+            Download
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            disabled={isDeleting}
+            onClick={() => onDelete(document.document_id, document.file_name)}
+          >
+            Delete
+          </button>
+        </div>
       </td>
     </tr>
   )

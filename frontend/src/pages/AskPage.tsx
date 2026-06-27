@@ -1,48 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useMemo, useState } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 
 import { askQuestion, listDocuments } from '../lib/api/client'
 import type { QueryResponse } from '../lib/api/types'
+import { formatDateTime, formatFileSize } from '../lib/format'
+import {
+  type AskScopeSortField,
+  type AskScopeSortState,
+  nextSortState,
+  sortScopeDocuments,
+} from '../lib/ask/scopeTable'
 
 type AskPageProps = {
   sessionId: string | null
-  activeDocumentId: string | null
-  activeDocumentName: string | null
 }
 
-export function AskPage({ sessionId, activeDocumentId, activeDocumentName }: AskPageProps) {
+export function AskPage({ sessionId }: AskPageProps) {
   const [question, setQuestion] = useState('')
-  const [explicitScope, setExplicitScope] = useState(false)
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([])
-  const [isScopeHelpOpen, setIsScopeHelpOpen] = useState(false)
-  const scopeHelpRef = useRef<HTMLSpanElement | null>(null)
-
-  useEffect(() => {
-    function onDocumentPointerDown(event: PointerEvent) {
-      if (!scopeHelpRef.current) {
-        return
-      }
-
-      if (!scopeHelpRef.current.contains(event.target as Node)) {
-        setIsScopeHelpOpen(false)
-      }
-    }
-
-    function onEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setIsScopeHelpOpen(false)
-      }
-    }
-
-    document.addEventListener('pointerdown', onDocumentPointerDown)
-    document.addEventListener('keydown', onEscape)
-
-    return () => {
-      document.removeEventListener('pointerdown', onDocumentPointerDown)
-      document.removeEventListener('keydown', onEscape)
-    }
-  }, [])
+  const [scopeValidationMessage, setScopeValidationMessage] = useState<string | null>(null)
+  const [sortState, setSortState] = useState<AskScopeSortState>({
+    field: 'date',
+    direction: 'desc',
+  })
 
   const documentsQuery = useQuery({
     queryKey: ['documents', 'for-query'],
@@ -59,7 +40,7 @@ export function AskPage({ sessionId, activeDocumentId, activeDocumentName }: Ask
         question,
         top_k: 5,
         max_citations: 5,
-        document_ids: explicitScope ? selectedDocumentIds : undefined,
+        document_ids: selectedDocumentIdsInScope,
       }
 
       return askQuestion(sessionId, payload)
@@ -72,7 +53,21 @@ export function AskPage({ sessionId, activeDocumentId, activeDocumentName }: Ask
     )
   }, [documentsQuery.data?.documents])
 
+  const sortedSelectableDocuments = useMemo(() => {
+    return sortScopeDocuments(selectableDocuments, sortState)
+  }, [selectableDocuments, sortState])
+
+  const selectableDocumentIds = useMemo(
+    () => new Set(selectableDocuments.map((document) => document.document_id)),
+    [selectableDocuments],
+  )
+  const selectedDocumentIdsInScope = selectedDocumentIds.filter((documentId) =>
+    selectableDocumentIds.has(documentId),
+  )
+  const hasStaleSelection = selectedDocumentIds.length > selectedDocumentIdsInScope.length
+
   function toggleDocument(documentId: string) {
+    setScopeValidationMessage(null)
     setSelectedDocumentIds((current) => {
       if (current.includes(documentId)) {
         return current.filter((id) => id !== documentId)
@@ -81,15 +76,72 @@ export function AskPage({ sessionId, activeDocumentId, activeDocumentName }: Ask
     })
   }
 
+  function selectAllDocuments() {
+    setScopeValidationMessage(null)
+    setSelectedDocumentIds(sortedSelectableDocuments.map((document) => document.document_id))
+  }
+
+  function clearSelectedDocuments() {
+    setScopeValidationMessage(null)
+    setSelectedDocumentIds([])
+  }
+
+  function attemptSubmitQuestion() {
+    if (!sessionId || question.trim().length < 5 || queryMutation.isPending) {
+      return
+    }
+
+    if (selectedDocumentIdsInScope.length === 0) {
+      setScopeValidationMessage('Select at least one document to ask this question.')
+      return
+    }
+
+    setScopeValidationMessage(null)
+    queryMutation.mutate()
+  }
+
   function submitQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    queryMutation.mutate()
+    attemptSubmitQuestion()
+  }
+
+  function onQuestionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && event.shiftKey) {
+      event.preventDefault()
+      attemptSubmitQuestion()
+    }
+  }
+
+  function onSort(field: AskScopeSortField) {
+    setSortState((current) => nextSortState(current, field))
+  }
+
+  function sortIndicator(field: AskScopeSortField): string {
+    if (sortState.field !== field) {
+      return ''
+    }
+    return sortState.direction === 'asc' ? ' \u2191' : ' \u2193'
+  }
+
+  function sortAriaSuffix(field: AskScopeSortField): string {
+    if (sortState.field !== field) {
+      return ''
+    }
+
+    return sortState.direction === 'asc' ? ' ascending' : ' descending'
+  }
+
+  function getAriaSort(field: AskScopeSortField): 'none' | 'ascending' | 'descending' {
+    if (sortState.field !== field) {
+      return 'none'
+    }
+    return sortState.direction === 'asc' ? 'ascending' : 'descending'
   }
 
   const canSubmit =
     Boolean(sessionId) &&
     question.trim().length >= 5 &&
-    (!explicitScope || selectedDocumentIds.length > 0)
+    selectableDocuments.length > 0
 
   return (
     <section>
@@ -98,8 +150,8 @@ export function AskPage({ sessionId, activeDocumentId, activeDocumentName }: Ask
           <p className="eyebrow">Retrieval</p>
           <h2>Ask</h2>
           <p className="muted">
-            Send grounded questions to the backend using either active document mode or explicit
-            document scope.
+            Send grounded questions with explicit document scope. Choose the exact document set for
+            each question.
           </p>
         </div>
       </header>
@@ -115,77 +167,118 @@ export function AskPage({ sessionId, activeDocumentId, activeDocumentName }: Ask
             rows={5}
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
+            onKeyDown={onQuestionKeyDown}
             placeholder="What are the parking restrictions in Skyline?"
           />
 
-          <label className="inline-checkbox toggle-row" htmlFor="explicit-scope">
-            <input
-              id="explicit-scope"
-              type="checkbox"
-              className="toggle-input"
-              checked={explicitScope}
-              onChange={(event) => setExplicitScope(event.target.checked)}
-            />
-            <span className="toggle-track" aria-hidden="true">
-              <span className="toggle-thumb" />
-            </span>
-            <span className="scope-option-wrap">
-              <span className="scope-option-text">
-                Use explicit document scope instead of the session active document.
-              </span>
-              <span
-                ref={scopeHelpRef}
-                className={`scope-help ${isScopeHelpOpen ? 'is-open' : ''}`}
-                tabIndex={0}
-                aria-label="What explicit document scope means"
-              >
-                <button
-                  type="button"
-                  className="scope-help-icon"
-                  aria-label="Explain explicit document scope"
-                  aria-expanded={isScopeHelpOpen}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    setIsScopeHelpOpen((current) => !current)
-                  }}
-                >
-                  ?
-                </button>
-                <span className="scope-help-tooltip">
-                  Toggle on to choose specific documents for this question.
-                  A document checklist appears below when enabled.
-                  Toggle off to use your current session active document.
-                </span>
-              </span>
-            </span>
-          </label>
-          <p className="muted scope-help-inline">
-            Tip: keep this off for active-document mode, or toggle on to pick documents manually.
-          </p>
+          <div>
+            <div className="card-title-row">
+              <label className="label">Explicit document scope</label>
+              <p className="muted">
+                Selected: {selectedDocumentIdsInScope.length} / {selectableDocuments.length}
+              </p>
+            </div>
 
-          {explicitScope ? (
-            <div className="document-picker">
-              {selectableDocuments.length === 0 ? (
-                <p className="muted">No completed documents are available to scope this query.</p>
+            <div className="ask-scope-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={selectAllDocuments}
+                disabled={selectableDocuments.length === 0}
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={clearSelectedDocuments}
+                disabled={selectedDocumentIdsInScope.length === 0}
+              >
+                Clear all
+              </button>
+            </div>
+
+            <div className="table-wrap ask-scope-table-wrap">
+              {sortedSelectableDocuments.length === 0 ? (
+                <p className="muted">No completed documents are available for explicit scope yet.</p>
               ) : (
-                selectableDocuments.map((document) => (
-                  <label key={document.document_id} className="inline-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={selectedDocumentIds.includes(document.document_id)}
-                      onChange={() => toggleDocument(document.document_id)}
-                    />
-                    {document.file_name}
-                  </label>
-                ))
+                <table className="ask-scope-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Select</th>
+                      <th scope="col" aria-sort={getAriaSort('name')}>
+                        <button type="button" className="sort-header-button" onClick={() => onSort('name')}>
+                          Name
+                          <span className="sort-icon" aria-hidden="true">
+                            {sortIndicator('name')}
+                          </span>
+                          <span className="sr-only">{sortAriaSuffix('name')}</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort={getAriaSort('date')}>
+                        <button type="button" className="sort-header-button" onClick={() => onSort('date')}>
+                          Date created
+                          <span className="sort-icon" aria-hidden="true">
+                            {sortIndicator('date')}
+                          </span>
+                          <span className="sr-only">{sortAriaSuffix('date')}</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort={getAriaSort('status')}>
+                        <button type="button" className="sort-header-button" onClick={() => onSort('status')}>
+                          Status
+                          <span className="sort-icon" aria-hidden="true">
+                            {sortIndicator('status')}
+                          </span>
+                          <span className="sr-only">{sortAriaSuffix('status')}</span>
+                        </button>
+                      </th>
+                      <th scope="col" aria-sort={getAriaSort('size')}>
+                        <button type="button" className="sort-header-button" onClick={() => onSort('size')}>
+                          Size
+                          <span className="sort-icon" aria-hidden="true">
+                            {sortIndicator('size')}
+                          </span>
+                          <span className="sr-only">{sortAriaSuffix('size')}</span>
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedSelectableDocuments.map((document) => (
+                      <tr key={document.document_id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${document.file_name}`}
+                            checked={selectedDocumentIdsInScope.includes(document.document_id)}
+                            onChange={() => toggleDocument(document.document_id)}
+                          />
+                        </td>
+                        <td>
+                          <p className="cell-title">{document.file_name}</p>
+                        </td>
+                        <td>{formatDateTime(document.upload_timestamp)}</td>
+                        <td>
+                          <span className={`status-pill ${document.processing_status.toLowerCase()}`}>
+                            {document.processing_status}
+                          </span>
+                        </td>
+                        <td>{formatFileSize(document.file_size_bytes)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
-          ) : (
-            <p className="muted">
-              Current active document: <span className="mono">{activeDocumentName ?? (activeDocumentId ? 'Selected document' : 'None')}</span>
-            </p>
-          )}
+
+            {scopeValidationMessage ? <p className="notice error">{scopeValidationMessage}</p> : null}
+            {hasStaleSelection ? (
+              <p className="notice success">
+                One or more deleted documents were automatically excluded from explicit scope.
+              </p>
+            ) : null}
+          </div>
 
           <button type="submit" className="primary" disabled={!canSubmit || queryMutation.isPending}>
             {queryMutation.isPending ? 'Running query...' : 'Ask question'}

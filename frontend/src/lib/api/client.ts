@@ -1,6 +1,6 @@
 import type {
-  ActiveDocumentResponse,
   ApiErrorEnvelope,
+  DocumentDownloadResponse,
   DocumentListResponse,
   DocumentRecord,
   DocumentUploadResponse,
@@ -135,23 +135,6 @@ export function deleteSession(sessionId: string) {
   })
 }
 
-export function setActiveDocument(sessionId: string, documentId: string) {
-  return request<ActiveDocumentResponse>('/api/sessions/current/active-document', {
-    method: 'PUT',
-    sessionId,
-    json: {
-      document_id: documentId,
-    },
-  })
-}
-
-export function clearActiveDocument(sessionId: string) {
-  return request<ActiveDocumentResponse>('/api/sessions/current/active-document', {
-    method: 'DELETE',
-    sessionId,
-  })
-}
-
 export function listDocuments(skip = 0, limit = 40) {
   const query = new URLSearchParams({
     skip: String(skip),
@@ -163,6 +146,77 @@ export function listDocuments(skip = 0, limit = 40) {
 
 export function getDocument(documentId: string) {
   return request<DocumentRecord>(`/api/documents/${documentId}`)
+}
+
+export function deleteDocument(documentId: string) {
+  return request<void>(`/api/documents/${documentId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function getDocumentDownloadUrl(documentId: string) {
+  return request<DocumentDownloadResponse>(`/api/documents/${documentId}/download-url`)
+}
+
+type DownloadedDocument = {
+  blob: Blob
+  fileName: string
+}
+
+function parseFileNameFromContentDisposition(headerValue: string | null, fallback: string): string {
+  if (!headerValue) {
+    return fallback
+  }
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const basicMatch = headerValue.match(/filename="?([^";]+)"?/i)
+  if (basicMatch?.[1]) {
+    return basicMatch[1]
+  }
+
+  return fallback
+}
+
+export async function downloadDocument(documentId: string): Promise<DownloadedDocument> {
+  const authSettings = getAuthSettings()
+  const headers = new Headers()
+
+  if (authSettings.mode === 'api_key') {
+    if (authSettings.apiKey) {
+      headers.set('X-API-Key', authSettings.apiKey)
+    }
+  } else {
+    const accessToken = await getOidcAccessToken()
+    if (!accessToken) {
+      throw new ApiError(401, 'No OIDC access token is available. Sign in first.')
+    }
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+
+  const response = await fetch(buildUrl(`/api/documents/${documentId}/download`), {
+    method: 'GET',
+    headers,
+  })
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseError(response))
+  }
+
+  const blob = await response.blob()
+  const fileName = parseFileNameFromContentDisposition(
+    response.headers.get('content-disposition'),
+    `document-${documentId}`,
+  )
+
+  return { blob, fileName }
 }
 
 export function uploadDocument(sessionId: string, file: File) {
