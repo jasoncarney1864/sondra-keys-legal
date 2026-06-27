@@ -66,10 +66,6 @@ async def test_hud_ingestion_sync_is_idempotent_and_updates_when_content_changes
     monkeypatch.setattr(settings.hud, 'source_state_path', state_path.as_posix())
     monkeypatch.setattr(settings.hud, 'sync_enabled', True)
 
-    async with db_session_maker() as session:
-        session.add(UserRecordORM(id=user_id))
-        await session.commit()
-
     source = HUDSourceDocument(
         source_id='fair-housing-act-overview',
         title='HUD Fair Housing Act Overview',
@@ -130,6 +126,9 @@ async def test_hud_ingestion_sync_is_idempotent_and_updates_when_content_changes
         assert persisted is not None
         assert persisted.file_name == '[HUD] HUD Fair Housing Act Overview'
         assert persisted.processing_status.value == 'completed'
+
+        user = await session.get(UserRecordORM, user_id)
+        assert user is not None
 
         chunks = (
             await session.execute(

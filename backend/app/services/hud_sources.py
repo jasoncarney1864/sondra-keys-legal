@@ -30,6 +30,7 @@ from backend.app.models.db import (
     DocumentRecordORM,
     ProcessingStatus,
     UserDocumentAccessORM,
+    UserRecordORM,
 )
 from backend.app.models.schemas import (
     AnalysisResultSchema,
@@ -247,6 +248,8 @@ class HUDIngestionService:
         *,
         force_refresh: bool = False,
     ) -> HUDIngestionSummary:
+        await self._ensure_user_record(session, user_id)
+
         if not settings.hud.sync_enabled:
             return HUDIngestionSummary(
                 ingested_count=0,
@@ -316,6 +319,8 @@ class HUDIngestionService:
         session: AsyncSession,
         user_id: str,
     ) -> list[HUDIngestionRecord]:
+        await self._ensure_user_record(session, user_id)
+
         state = self._load_state()
         source_state: dict[str, dict[str, Any]] = state.get("sources", {})
 
@@ -528,6 +533,17 @@ class HUDIngestionService:
                     document_id=document_id,
                 )
             )
+            await session.flush()
+
+    async def _ensure_user_record(
+        self,
+        session: AsyncSession,
+        user_id: str,
+    ) -> None:
+        """Create the user row on-demand for first-time HUD sync callers."""
+        existing = await session.get(UserRecordORM, user_id)
+        if existing is None:
+            session.add(UserRecordORM(id=user_id))
             await session.flush()
 
     def _load_state(self) -> dict[str, Any]:
