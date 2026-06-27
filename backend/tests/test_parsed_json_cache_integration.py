@@ -89,10 +89,10 @@ class FakeSearchService:
     async def index_chunks(self, document_id: str, chunks, file_name: str = "") -> None:
         return None
 
-    async def vector_search(self, query_vector, top_k: int):
+    async def vector_search(self, query_vector, top_k: int, document_ids=None):
         return []
 
-    async def hybrid_search(self, query_text: str, query_vector, top_k: int):
+    async def hybrid_search(self, query_text: str, query_vector, top_k: int, document_ids=None):
         return []
 
     async def delete_document_chunks(self, document_id: str) -> None:

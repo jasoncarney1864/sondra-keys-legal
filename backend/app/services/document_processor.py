@@ -30,6 +30,7 @@ from backend.app.core.exceptions import (
     BlobUploadException,
     BlobDeleteException,
     BlobNotFoundException,
+    StorageServiceException,
     DocumentIntelligenceException,
 )
 from backend.app.models.schemas import (
@@ -257,6 +258,31 @@ class DocumentProcessor(AbstractDocumentService):
             expiry=datetime.now(timezone.utc) + timedelta(hours=1),
         )
         return f"{blob_client.url}?{sas_token}"
+
+    async def download_blob(self, blob_name: str) -> bytes:
+        """Download full blob content as bytes."""
+        await self._ensure_initialized()
+
+        try:
+            blob_client = self._blob_container_client.get_blob_client(blob_name)
+            data = await blob_client.download_blob()
+            return await data.readall()
+        except ResourceNotFoundError as e:
+            raise BlobNotFoundException(
+                f"Blob '{blob_name}' does not exist in container "
+                f"'{settings.azure.blob_container_name}'",
+                detail=str(e),
+            ) from e
+        except HttpResponseError as e:
+            raise StorageServiceException(
+                f"Failed to download blob '{blob_name}' from Azure Storage",
+                detail=e.message,
+            ) from e
+        except Exception as e:
+            raise StorageServiceException(
+                f"Unexpected error downloading blob '{blob_name}'",
+                detail=str(e),
+            ) from e
 
     async def load_parsed_json(self, blob_name: str) -> dict[str, Any] | None:
         """Load parsed-document JSON cache from blob storage."""

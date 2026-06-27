@@ -289,19 +289,29 @@ class QueryService(AbstractQueryService):
             LLMServiceException: On search service failure
         """
         try:
+            scoped_document_ids = [str(d) for d in document_ids] if document_ids else None
+
             results = await self.search_service.hybrid_search(
                 query_text=question,
                 query_vector=query_vector,
                 top_k=top_k,
+                document_ids=scoped_document_ids,
             )
 
-            # Post-filter by document_id if specified
-            if document_ids:
-                document_id_set = set(str(d) for d in document_ids)
-                results = [
-                    r for r in results
-                    if str(r.document_id) in document_id_set
-                ]
+            # Fallback path: if scoped hybrid retrieval returned nothing,
+            # run a broader vector-only retrieval within the same scope.
+            if not results and scoped_document_ids:
+                fallback_top_k = min(max(top_k * 4, 12), 50)
+                logger.info(
+                    "context_retrieval_fallback_vector",
+                    scoped_documents=len(scoped_document_ids),
+                    fallback_top_k=fallback_top_k,
+                )
+                results = await self.search_service.vector_search(
+                    query_vector=query_vector,
+                    top_k=fallback_top_k,
+                    document_ids=scoped_document_ids,
+                )
 
             logger.info("context_retrieved", count=len(results))
             return results

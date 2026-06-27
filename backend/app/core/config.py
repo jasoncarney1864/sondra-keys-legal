@@ -58,7 +58,7 @@ class DatabaseSettings(BaseSettings):
     """Database configuration."""
 
     database_url: str = Field(
-        default="sqlite:///./legal_qa.db",
+        default="sqlite+aiosqlite:///./legal_qa.db",
         description="Database connection URL"
     )
     database_echo: bool = Field(

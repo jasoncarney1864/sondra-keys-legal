@@ -295,6 +295,7 @@ class AzureAISearchService(AbstractSearchService):
         self,
         query_vector: list[float],
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[SearchResultSchema]:
         """
         Pure KNN vector search (no BM25 text component).
@@ -314,10 +315,13 @@ class AzureAISearchService(AbstractSearchService):
                 fields="content_vector",
             )
 
+            filter_expression = self._build_document_filter(document_ids)
+
             results = await self._search_client.search(
                 search_text=None,
                 vector_queries=[vector_query],
                 top=top_k,
+                filter=filter_expression,
                 select=["id", "document_id", "chunk_index", "content", "page_number", "section_title", "file_name"],
             )
 
@@ -337,9 +341,10 @@ class AzureAISearchService(AbstractSearchService):
                 )
 
             logger.info(
-                "vector_search_completed top_k=%s results_returned=%s",
+                "vector_search_completed top_k=%s results_returned=%s scoped_documents=%s",
                 top_k,
                 len(search_results),
+                len(document_ids or []),
             )
             return search_results
 
@@ -361,6 +366,7 @@ class AzureAISearchService(AbstractSearchService):
         query_text: str,
         query_vector: list[float],
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[SearchResultSchema]:
         """
         Hybrid BM25 + KNN search with Reciprocal Rank Fusion (RRF).
@@ -387,11 +393,14 @@ class AzureAISearchService(AbstractSearchService):
                 fields="content_vector",
             )
 
+            filter_expression = self._build_document_filter(document_ids)
+
             # Execute hybrid search with RRF (Reciprocal Rank Fusion)
             results = await self._search_client.search(
                 search_text=query_text,
                 vector_queries=[vector_query],
                 top=top_k,
+                filter=filter_expression,
                 select=["id", "document_id", "chunk_index", "content", "page_number", "section_title", "file_name"],
             )
 
@@ -411,10 +420,11 @@ class AzureAISearchService(AbstractSearchService):
                 )
 
             logger.info(
-                "hybrid_search_completed query_length=%s top_k=%s results_returned=%s",
+                "hybrid_search_completed query_length=%s top_k=%s results_returned=%s scoped_documents=%s",
                 len(query_text),
                 top_k,
                 len(search_results),
+                len(document_ids or []),
             )
             return search_results
 
@@ -489,3 +499,13 @@ class AzureAISearchService(AbstractSearchService):
                 "Failed to delete chunks from search index.",
                 detail="Failed to delete chunks from search index."
             ) from e
+
+    @staticmethod
+    def _build_document_filter(document_ids: list[str] | None) -> str | None:
+        """Build OData filter for one or more document IDs."""
+        if not document_ids:
+            return None
+
+        sanitized_ids = [str(doc_id).replace("'", "''") for doc_id in document_ids]
+        clauses = [f"document_id eq '{doc_id}'" for doc_id in sanitized_ids]
+        return " or ".join(clauses)

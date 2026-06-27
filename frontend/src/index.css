@@ -96,6 +96,7 @@ h3 {
   margin-top: 2.2rem;
   display: grid;
   gap: 0.5rem;
+  min-height: 16.5rem;
 }
 
 .nav-link {
@@ -115,6 +116,12 @@ h3 {
 .nav-link.active {
   border-color: rgba(255, 255, 255, 0.2);
   background: linear-gradient(90deg, rgba(217, 165, 60, 0.28), rgba(255, 255, 255, 0.13));
+}
+
+.nav-link-help {
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  padding-top: 0.9rem;
 }
 
 .status-stack {
@@ -191,6 +198,35 @@ h3 {
   gap: 0.85rem;
 }
 
+.portal-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.portal-lead {
+  max-width: 70ch;
+}
+
+.portal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.portal-card {
+  border: 1px solid #d8ccb6;
+  border-radius: 0.9rem;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(245, 242, 232, 0.78));
+  padding: 1rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.portal-card p {
+  color: #53605a;
+  line-height: 1.45;
+}
+
 .dashboard-page {
   position: relative;
   overflow: hidden;
@@ -256,6 +292,176 @@ h3 {
 .dashboard-tile p {
   color: #58645f;
   line-height: 1.45;
+}
+
+.dashboard-start {
+  border: 1px solid #d5c8b1;
+  border-radius: 0.85rem;
+  background: linear-gradient(145deg, rgba(255, 249, 236, 0.86), rgba(244, 238, 224, 0.74));
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.dashboard-start h3 {
+  color: #2f3a35;
+}
+
+.dashboard-howto-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.dashboard-howto-step {
+  border: 1px solid #d8ccb6;
+  border-radius: 0.7rem;
+  background: rgba(255, 252, 244, 0.76);
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.dashboard-step-link {
+  justify-self: start;
+  text-decoration: none;
+  border: 1px solid #0d5b4a;
+  color: #f6fffb;
+  background: linear-gradient(140deg, #0e6a56, #0d5b4a);
+  border-radius: 0.6rem;
+  padding: 0.35rem 0.7rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.dashboard-step-link:hover {
+  filter: brightness(1.05);
+}
+
+.dashboard-howto-step h4 {
+  color: #2f3a35;
+  font-size: 0.96rem;
+}
+
+.dashboard-start-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: #505d58;
+  display: grid;
+  gap: 0.35rem;
+  line-height: 1.45;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.help-card {
+  border: 1px solid #d8ccb6;
+  border-radius: 0.85rem;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(245, 242, 232, 0.78));
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.help-card p {
+  color: #53605a;
+  line-height: 1.45;
+}
+
+.help-card-link {
+  justify-self: start;
+  text-decoration: none;
+  border: 1px solid #0d5b4a;
+  color: #f6fffb;
+  background: linear-gradient(140deg, #0e6a56, #0d5b4a);
+  border-radius: 0.6rem;
+  padding: 0.35rem 0.7rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.help-card-link:hover {
+  filter: brightness(1.05);
+}
+
+.pdf-back-link {
+  margin: 0.5rem;
+}
+
+.help-support {
+  margin-top: 0.85rem;
+}
+
+.help-support-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.help-support-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid #d8ccb6;
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.65rem;
+  background: rgba(255, 252, 244, 0.7);
+}
+
+.help-support-list span {
+  color: #4f5b56;
+}
+
+.pdf-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.pdf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.pdf-image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.pdf-image-card {
+  border: 1px solid #d8ccb6;
+  border-radius: 0.8rem;
+  background: rgba(255, 252, 244, 0.75);
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pdf-image-preview {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border: 1px solid #d8d1c5;
+  border-radius: 0.6rem;
+  background: #ffffff;
+}
+
+.pdf-issues-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.25rem;
 }
 
 .card-title-row {
@@ -609,6 +815,61 @@ th {
   background: var(--surface);
 }
 
+.ask-scope-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+
+.ask-scope-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--surface);
+}
+
+.ask-scope-table {
+  min-width: 680px;
+}
+
+.sort-header-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sort-icon {
+  display: inline-block;
+  min-width: 1.1rem;
+  margin-left: 0.2rem;
+}
+
+.sort-header-button:hover {
+  text-decoration: underline;
+}
+
+.sort-header-button:focus-visible {
+  outline: 2px solid rgba(14, 106, 86, 0.45);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
 .answer-text {
   white-space: pre-wrap;
   line-height: 1.75;
@@ -665,6 +926,26 @@ th {
   }
 
   .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-howto-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .help-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pdf-upload-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pdf-image-grid {
     grid-template-columns: 1fr;
   }
 

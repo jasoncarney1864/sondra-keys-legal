@@ -219,6 +219,18 @@ docker build -t sondra-keys-backend:latest .
 ```bash
 docker run -p 8000:8000 \
   --env-file .env \
+  -v "$(pwd)/data:/workspace/data" \
+  -e DB_DATABASE_URL="sqlite+aiosqlite:////workspace/data/legal_qa.db" \
+  sondra-keys-backend:latest
+```
+
+For Windows PowerShell:
+
+```powershell
+docker run -p 8000:8000 `
+  --env-file .env `
+  -v "${PWD}\data:/workspace/data" `
+  -e DB_DATABASE_URL="sqlite+aiosqlite:////workspace/data/legal_qa.db" `
   sondra-keys-backend:latest
 ```
 

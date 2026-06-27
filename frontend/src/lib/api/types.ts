@@ -20,12 +20,6 @@ export interface SessionListResponse {
   total_count: number
 }
 
-export interface ActiveDocumentResponse {
-  session_id: string
-  active_document_id: string | null
-  active_document_file_name: string | null
-}
-
 export interface DocumentUploadResponse {
   document_id: string
   file_name: string
@@ -42,6 +36,12 @@ export interface DocumentRecord {
   page_count: number | null
   processing_status: string
   uploaded_by_user_id: string | null
+}
+
+export interface DocumentDownloadResponse {
+  document_id: string
+  file_name: string
+  download_url: string
 }
 
 export interface DocumentListResponse {

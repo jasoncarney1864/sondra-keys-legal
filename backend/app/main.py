@@ -81,6 +81,26 @@ SESSION_RETENTION_LOCK_FILE = "/tmp/startup_session_retention_cleanup.lock"
 PARSED_JSON_RETENTION_LOCK_FILE = "/tmp/startup_parsed_json_retention_cleanup.lock"
 
 
+def log_database_persistence_context() -> None:
+    """Emit startup diagnostics for DB persistence configuration."""
+    db_url = settings.database.database_url
+
+    logger.info(
+        "database_configuration_detected",
+        database_url=db_url,
+    )
+
+    if db_url.startswith("sqlite") and "/tmp/" in db_url:
+        logger.warning(
+            "database_persistence_risk_detected",
+            reason="sqlite_path_in_tmp",
+            recommendation=(
+                "Use a persistent path (for containers, mount host storage and "
+                "set DB_DATABASE_URL to sqlite+aiosqlite:////workspace/data/legal_qa.db)."
+            ),
+        )
+
+
 async def reconcile_stale_processing_states() -> int:
     """Mark interrupted in-progress documents as FAILED during startup."""
     recovery_message = (
@@ -510,6 +530,7 @@ async def lifespan(app: FastAPI):
         version=settings.app_version,
         environment=settings.environment,
     )
+    log_database_persistence_context()
 
     # Initialize database schema
     try:

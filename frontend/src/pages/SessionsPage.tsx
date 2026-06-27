@@ -6,17 +6,15 @@ import { formatDateTime } from '../lib/format'
 
 type SessionsPageProps = {
   currentSessionId: string | null
-  currentActiveDocumentName: string | null
   onSessionSelected: (sessionId: string | null) => void
 }
 
 const ACCEPTED_FILE_TYPES = '.pdf, .docx, .doc, .txt'
 const MAX_UPLOAD_MB = Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? 50)
 
-export function SessionsPage({ currentSessionId, currentActiveDocumentName, onSessionSelected }: SessionsPageProps) {
+export function SessionsPage({ currentSessionId, onSessionSelected }: SessionsPageProps) {
   const [newSessionFile, setNewSessionFile] = useState<File | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [currentSessionFile, setCurrentSessionFile] = useState<File | null>(null)
   const [uploadNotice, setUploadNotice] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const sessionsQuery = useQuery({
@@ -57,26 +55,6 @@ export function SessionsPage({ currentSessionId, currentActiveDocumentName, onSe
     },
   })
 
-  const uploadCurrentSessionMutation = useMutation({
-    mutationFn: async (file: File) => {
-      if (!currentSessionId) {
-        throw new Error('Select or create a session before uploading a document.')
-      }
-      return uploadDocument(currentSessionId, file)
-    },
-    onSuccess: async () => {
-      setUploadNotice(
-        currentSessionFile
-          ? `Uploaded '${currentSessionFile.name}' to current session.`
-          : 'Uploaded document to current session.',
-      )
-      setCurrentSessionFile(null)
-      await queryClient.invalidateQueries({ queryKey: ['sessions'] })
-      await queryClient.invalidateQueries({ queryKey: ['session-current'] })
-      await queryClient.invalidateQueries({ queryKey: ['documents'] })
-    },
-  })
-
   const deleteSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
       await deleteSession(sessionId)
@@ -99,7 +77,7 @@ export function SessionsPage({ currentSessionId, currentActiveDocumentName, onSe
           <p className="eyebrow">Identity</p>
           <h2>Sessions</h2>
           <p className="muted">
-            Create and select sticky sessions. Active document choice is isolated per session.
+            Create and select sticky sessions to preserve conversation continuity.
           </p>
         </div>
         <div className="session-create-actions">
@@ -135,7 +113,7 @@ export function SessionsPage({ currentSessionId, currentActiveDocumentName, onSe
           >
             <h3 id="create-session-title">Create session</h3>
             <p className="muted">
-              Upload a document now if you want this new session ready for active-document mode.
+              Upload a document now if you want this new session ready for immediate questions.
             </p>
             <input
               type="file"
@@ -183,48 +161,7 @@ export function SessionsPage({ currentSessionId, currentActiveDocumentName, onSe
         {deleteSessionMutation.isError ? (
           <p className="notice error">{(deleteSessionMutation.error as Error).message}</p>
         ) : null}
-        {uploadCurrentSessionMutation.isError ? (
-          <p className="notice error">{(uploadCurrentSessionMutation.error as Error).message}</p>
-        ) : null}
         {uploadNotice ? <p className="notice success">{uploadNotice}</p> : null}
-
-        {!currentActiveDocumentName ? (
-          <div className="session-upload-callout">
-            <div className="session-upload-head">
-              <span className="upload-badge" aria-hidden="true">
-                <svg viewBox="0 0 24 24" role="img" focusable="false">
-                  <path d="M12 3l4 4h-3v7h-2V7H8l4-4zm-7 13h14v5H5v-5z" fill="currentColor" />
-                </svg>
-              </span>
-              <div>
-                <p className="label">No document selected for current session</p>
-                <p className="muted">
-                  Add one now to use active-document mode. Allowed: {ACCEPTED_FILE_TYPES}. Max size: {MAX_UPLOAD_MB} MB.
-                </p>
-              </div>
-            </div>
-            <div className="session-upload-actions">
-              <input
-                type="file"
-                accept={ACCEPTED_FILE_TYPES}
-                onChange={(event) => setCurrentSessionFile(event.target.files?.[0] ?? null)}
-              />
-              <button
-                type="button"
-                className="primary"
-                disabled={!currentSessionId || !currentSessionFile || uploadCurrentSessionMutation.isPending}
-                onClick={() => {
-                  if (!currentSessionFile) {
-                    return
-                  }
-                  uploadCurrentSessionMutation.mutate(currentSessionFile)
-                }}
-              >
-                {uploadCurrentSessionMutation.isPending ? 'Uploading...' : 'Upload to current session'}
-              </button>
-            </div>
-          </div>
-        ) : null}
 
         {(sessionsQuery.data?.sessions.length ?? 0) === 0 ? (
           <p className="muted">No sessions found.</p>
@@ -234,7 +171,6 @@ export function SessionsPage({ currentSessionId, currentActiveDocumentName, onSe
               <thead>
                 <tr>
                   <th>Session</th>
-                  <th>Active document</th>
                   <th>Last accessed</th>
                   <th>Expires</th>
                   <th>Action</th>
@@ -247,9 +183,6 @@ export function SessionsPage({ currentSessionId, currentActiveDocumentName, onSe
                   return (
                     <tr key={session.session_id}>
                       <td className="mono">{session.session_id}</td>
-                      <td>
-                        {session.active_document_file_name ?? (session.active_document_id ? 'Selected document' : 'None')}
-                      </td>
                       <td>{formatDateTime(session.last_accessed_at)}</td>
                       <td>{formatDateTime(session.expires_at)}</td>
                       <td>

@@ -95,6 +95,14 @@ class DocumentRecord(BaseModel):
     uploaded_by_user_id: str | None = None
 
 
+class DocumentDownloadResponse(BaseModel):
+    """Returned from GET /api/documents/{document_id}/download-url."""
+
+    document_id: UUID
+    file_name: str
+    download_url: HttpUrl
+
+
 class DocumentListResponse(BaseModel):
     """Returned from GET /api/documents."""
 

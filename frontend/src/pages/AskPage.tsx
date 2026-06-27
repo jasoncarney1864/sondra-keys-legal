@@ -38,7 +38,7 @@ export function AskPage({ sessionId }: AskPageProps) {
 
       const payload = {
         question,
-        top_k: 5,
+        top_k: 8,
         max_citations: 5,
         document_ids: selectedDocumentIdsInScope,
       }

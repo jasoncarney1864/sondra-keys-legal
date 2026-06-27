@@ -1,12 +1,31 @@
-# Sondra Keys Legal Frontend
+# Sondra Keys Frontend Portal
 
-React + TypeScript client for session-scoped document operations and Q&A.
+React + TypeScript portal that launches Sondra Keys child sites.
 
-## Views
+Current child site:
 
-- Documents: upload files, monitor processing status, set/clear active document.
-- Ask: submit grounded legal questions using active document mode or explicit document scope.
-- Sessions: create and switch sticky sessions.
+- Sondra Keys Legal: session-scoped document operations and Q&A.
+- Sondra Keys PDF Builder: create PDFs from selected image pages (zip upload or one-by-one).
+
+## Portal-first Routing
+
+- `/` is the Sondra Keys portal home.
+- Sondra Keys Legal lives under `/legal/*`.
+- Legacy legal entry paths (`/dashboard`, `/documents`, `/ask`, `/sessions`, `/help`) intentionally redirect to `/` with a `from` query hint.
+- Users launch legal from the portal card. This keeps portal-first access consistent while preserving clear deep-link intent.
+
+## Legal Views
+
+- Documents: upload files and monitor processing status.
+- Ask: submit grounded legal questions using explicit document scope selection.
+- Sessions: create and switch sticky sessions for conversation continuity.
+
+## PDF Builder View
+
+- Upload image pages one-by-one or as a zip file.
+- Select pages and reorder before generating.
+- Enter a safe PDF name with invalid-character sanitization.
+- Generate and download a PDF in-browser.
 
 ## Environment
 
@@ -51,7 +70,7 @@ npm run test:e2e:install
 npm run test:e2e
 ```
 
-These tests mock `/api/*` responses and validate session creation, active-document enforcement, and upload dedupe behavior through the UI.
+These tests mock `/api/*` responses and validate session creation, explicit document scope enforcement, and upload dedupe behavior through the UI.
 
 ## Azure Static Web Apps
 

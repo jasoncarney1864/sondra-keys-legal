@@ -56,6 +56,11 @@ class AbstractStorageService(ABC):
         """Return a pre-authenticated URL for a stored blob."""
         ...
 
+    @abstractmethod
+    async def download_blob(self, blob_name: str) -> bytes:
+        """Download blob content bytes by blob name."""
+        ...
+
 
 class AbstractExtractionService(ABC):
     """Contract for document intelligence / metadata extraction."""
@@ -188,11 +193,15 @@ class AbstractSearchService(ABC):
         self,
         query_vector: list[float],
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[SearchResultSchema]:
         """Pure KNN vector search — no BM25 text-scoring component.
 
         Use when the query is already embedded and exact keyword matching
         is not required (e.g., semantic paraphrasing over clause language).
+
+        Implementations should honor ``document_ids`` by applying an
+        index-level filter when provided.
         """
         ...
 
@@ -202,11 +211,15 @@ class AbstractSearchService(ABC):
         query_text: str,
         query_vector: list[float],
         top_k: int,
+        document_ids: list[str] | None = None,
     ) -> list[SearchResultSchema]:
         """Reciprocal-rank fusion of BM25 full-text and KNN vector search.
 
         Preferred for legal Q&A because defined terms and clause references
         benefit from exact keyword matching alongside semantic retrieval.
+
+        Implementations should honor ``document_ids`` by applying an
+        index-level filter when provided.
         """
         ...
 

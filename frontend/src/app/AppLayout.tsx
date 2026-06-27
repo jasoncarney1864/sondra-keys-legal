@@ -2,8 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 type AppLayoutProps = {
   sessionId: string | null
-  activeDocumentId: string | null
-  activeDocumentName: string | null
+  sessionDisplayLabel: string | null
   isSessionLoading: boolean
   authMode: 'api_key' | 'oidc'
   hasApiKey: boolean
@@ -17,8 +16,7 @@ type AppLayoutProps = {
 
 export function AppLayout({
   sessionId,
-  activeDocumentId,
-  activeDocumentName,
+  sessionDisplayLabel,
   isSessionLoading,
   authMode,
   hasApiKey,
@@ -36,31 +34,37 @@ export function AppLayout({
       <aside className="shell-sidebar">
         <p className="eyebrow">Sondra Keys Legal</p>
         <h1 className="brand-title">Enterprise QA Console</h1>
-        <p className="brand-subtitle">Session-scoped legal retrieval operations</p>
+        <p className="brand-subtitle">Session continuity with explicit document scope on Ask</p>
 
         <nav className="nav-list" aria-label="Primary">
-          <NavLink to="/dashboard" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+          <NavLink to="/" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+            Sondra Keys Portal
+          </NavLink>
+          <NavLink to="/legal/dashboard" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             Dashboard
           </NavLink>
-          <NavLink to="/documents" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
-            Documents
-          </NavLink>
-          <NavLink to="/ask" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+          <NavLink to="/legal/ask" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             Ask
           </NavLink>
-          <NavLink to="/sessions" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+          <NavLink to="/legal/documents" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+            Documents
+          </NavLink>
+          <NavLink to="/legal/sessions" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             Sessions
+          </NavLink>
+          <NavLink
+            to="/legal/help"
+            className={({ isActive }) => (isActive ? 'nav-link nav-link-help active' : 'nav-link nav-link-help')}
+          >
+            Help
           </NavLink>
         </nav>
 
         <div className="status-stack">
           <div className="status-card">
-            <p className="status-label">Session</p>
-            <p className="status-value mono">{isSessionLoading ? 'Resolving...' : sessionId ?? 'Not set'}</p>
-          </div>
-          <div className="status-card">
-            <p className="status-label">Active document</p>
-            <p className="status-value">{activeDocumentName ?? (activeDocumentId ? 'Selected document' : 'None')}</p>
+            <p className="status-label">Current session</p>
+            <p className="status-value">{isSessionLoading ? 'Resolving...' : sessionDisplayLabel ?? 'Not set'}</p>
+            {!isSessionLoading && sessionId ? <p className="status-value mono">{sessionId}</p> : null}
           </div>
           <div className="status-card">
             <p className="status-label">Auth</p>
