@@ -63,45 +63,6 @@ async function attachMockApi(page: Page, state: MockState) {
     })
   })
 
-  await page.route('**/api/sessions/current/active-document', async (route) => {
-    const request = route.request()
-    if (request.method() === 'PUT') {
-      const body = request.postDataJSON() as { document_id: string }
-      const activeDocument = state.documents.find((document) => document.document_id === body.document_id)
-      state.sessions = state.sessions.map((session) =>
-        session.session_id === state.currentSessionId
-          ? {
-              ...session,
-              active_document_id: body.document_id,
-              active_document_file_name: activeDocument?.file_name ?? null,
-              last_accessed_at: utcNow(),
-            }
-          : session,
-      )
-      return fulfill(route, {
-        session_id: state.currentSessionId,
-        active_document_id: body.document_id,
-        active_document_file_name: activeDocument?.file_name ?? null,
-      })
-    }
-
-    state.sessions = state.sessions.map((session) =>
-      session.session_id === state.currentSessionId
-        ? {
-            ...session,
-            active_document_id: null,
-            active_document_file_name: null,
-            last_accessed_at: utcNow(),
-          }
-        : session,
-    )
-    return fulfill(route, {
-      session_id: state.currentSessionId,
-      active_document_id: null,
-      active_document_file_name: null,
-    })
-  })
-
   await page.route('**/api/sessions/current', async (route) => {
     const active = state.sessions.find((session) => session.session_id === state.currentSessionId)
     if (!active) {
@@ -163,6 +124,57 @@ async function attachMockApi(page: Page, state: MockState) {
     })
   })
 
+  await page.route('**/api/documents/*', async (route) => {
+    const request = route.request()
+    if (request.method() !== 'DELETE') {
+      return route.fallback()
+    }
+
+    const pathname = new URL(request.url()).pathname
+    const segments = pathname.split('/').filter(Boolean)
+    if (segments.length !== 3 || segments[0] !== 'api' || segments[1] !== 'documents') {
+      return route.fallback()
+    }
+
+    const documentId = segments[2]
+    const exists = state.documents.some((document) => document.document_id === documentId)
+    if (!exists) {
+      return route.fulfill({ status: 204, body: '' })
+    }
+
+    state.documents = state.documents.filter((document) => document.document_id !== documentId)
+    state.sessions = state.sessions.map((session) =>
+      session.active_document_id === documentId
+        ? {
+            ...session,
+            active_document_id: null,
+            active_document_file_name: null,
+          }
+        : session,
+    )
+
+    return route.fulfill({ status: 204, body: '' })
+  })
+
+  await page.route('**/api/documents/*/download', async (route) => {
+    const segments = new URL(route.request().url()).pathname.split('/')
+    const documentId = segments[segments.length - 2]
+    const documentRecord = state.documents.find((document) => document.document_id === documentId)
+
+    if (!documentRecord) {
+      return fulfill(route, { detail: 'Document not found.' }, 404)
+    }
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      headers: {
+        'content-disposition': `attachment; filename="${documentRecord.file_name}"`,
+      },
+      body: '%PDF-1.4\n%Mock\n',
+    })
+  })
+
   await page.route('**/api/documents/upload', async (route) => {
     state.uploadCalls += 1
     if (state.uploadCalls === 1) {
@@ -186,19 +198,13 @@ async function attachMockApi(page: Page, state: MockState) {
 
   await page.route('**/api/query', async (route) => {
     const body = route.request().postDataJSON() as { question: string; document_ids?: string[] }
-    const currentSession = state.sessions.find((session) => session.session_id === state.currentSessionId)
-    const effectiveDocumentIds = body.document_ids?.length
-      ? body.document_ids
-      : currentSession?.active_document_id
-        ? [currentSession.active_document_id]
-        : []
+    const effectiveDocumentIds = body.document_ids?.length ? body.document_ids : []
 
     if (effectiveDocumentIds.length === 0) {
       return fulfill(
         route,
         {
-          detail:
-            'No active document selected for this session. Select an active document first or pass document_ids explicitly.',
+          detail: 'Select at least one document in explicit document scope.',
         },
         400,
       )
@@ -241,8 +247,26 @@ function createBaseState(): MockState {
         document_id: 'doc-1',
         file_name: 'Skyline-Mobile-Home-Park-Rules-Regs.pdf',
         file_size_bytes: 240_000,
-        upload_timestamp: utcNow(),
+        upload_timestamp: '2026-06-26T12:00:00.000Z',
         page_count: 12,
+        processing_status: 'completed',
+        uploaded_by_user_id: 'local-dev-user',
+      },
+      {
+        document_id: 'doc-2',
+        file_name: 'Alpha-Lease-Agreement.pdf',
+        file_size_bytes: 110_000,
+        upload_timestamp: '2026-06-20T12:00:00.000Z',
+        page_count: 8,
+        processing_status: 'completed',
+        uploaded_by_user_id: 'local-dev-user',
+      },
+      {
+        document_id: 'doc-3',
+        file_name: 'Tenant-Rights-Overview.pdf',
+        file_size_bytes: 180_000,
+        upload_timestamp: '2026-06-24T12:00:00.000Z',
+        page_count: 10,
         processing_status: 'completed',
         uploaded_by_user_id: 'local-dev-user',
       },
@@ -251,12 +275,64 @@ function createBaseState(): MockState {
   }
 }
 
-test('session creation is reflected in the sessions view', async ({ page }) => {
+async function enterLegalWorkspace(page: Page) {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Open Sondra Keys Legal' }).click()
+  await expect(page.getByRole('heading', { level: 2, name: /Good to see you/i })).toBeVisible()
+}
+
+test('portal is default landing page and renders site registry cards', async ({ page }) => {
   const state = createBaseState()
   await attachMockApi(page, state)
 
   await page.goto('/')
-  await page.getByRole('link', { name: 'Sessions' }).click()
+
+  await expect(page.getByRole('heading', { level: 2, name: /Welcome to Sondra Keys/i })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys Legal' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys PDF Builder' })).toBeVisible()
+})
+
+test('portal navigation opens Sondra Keys Legal workspace', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Open Sondra Keys Legal' }).click()
+
+  await expect(page).toHaveURL(/\/legal\/dashboard$/)
+  await expect(page.getByRole('navigation', { name: 'Primary' }).getByText('Sondra Keys Portal')).toBeVisible()
+})
+
+test('portal navigation opens PDF Builder workspace', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Open Sondra Keys PDF Builder' }).click()
+
+  await expect(page).toHaveURL(/\/pdf-builder$/)
+  await expect(page.getByRole('heading', { level: 2, name: /Build a PDF from your page images/i })).toBeVisible()
+})
+
+test('direct legacy route redirects to portal then resumes in legal workspace', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await page.goto('/dashboard')
+
+  await expect(page).toHaveURL(/\/?\?from=%2Fdashboard$/)
+  await expect(page.getByText(/route now opens through the Sondra Keys portal/i)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Open Sondra Keys Legal' }).click()
+  await expect(page).toHaveURL(/\/legal\/dashboard$/)
+})
+
+test('session creation is reflected in the sessions view', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await enterLegalWorkspace(page)
+  await page.getByRole('link', { name: 'Sessions', exact: true }).click()
 
   await page.getByRole('button', { name: 'Create session' }).click()
   await page.getByRole('dialog', { name: 'Create session' }).getByRole('button', { name: 'Create now' }).click()
@@ -269,45 +345,71 @@ test('dashboard is the default landing page and top navigation item', async ({ p
   const state = createBaseState()
   await attachMockApi(page, state)
 
-  await page.goto('/')
+  await enterLegalWorkspace(page)
 
   await expect(page.getByRole('heading', { level: 2, name: /Good to see you/i })).toBeVisible()
-  await expect(page.getByRole('navigation', { name: 'Primary' }).locator('a').first()).toHaveText('Dashboard')
+  await expect(page.getByRole('navigation', { name: 'Primary' }).locator('a').nth(1)).toHaveText('Dashboard')
+  await expect(page.getByText(/^Session session-1$/)).toBeVisible()
 })
 
-test('active-document enforcement fails then succeeds after selecting a document', async ({ page }) => {
+test('explicit document scope requires selection and then succeeds', async ({ page }) => {
   const state = createBaseState()
   await attachMockApi(page, state)
 
-  await page.goto('/')
-  await page.getByRole('link', { name: 'Ask' }).click()
+  await enterLegalWorkspace(page)
+  await page.getByRole('link', { name: 'Ask', exact: true }).click()
 
   await page.getByLabel('Prompt').fill('What are the Skyline parking rules?')
   await page.getByRole('button', { name: 'Ask question' }).click()
 
-  await expect(page.getByText(/No active document selected for this session/i)).toBeVisible()
+  await expect(page.getByText(/Select at least one document to ask this question/i)).toBeVisible()
 
-  await page.getByRole('link', { name: 'Documents' }).click()
-  await page.getByRole('button', { name: 'Set active' }).click()
-  const skylineRow = page.getByRole('row', {
-    name: /Skyline-Mobile-Home-Park-Rules-Regs.pdf/i,
-  })
-  await expect(skylineRow.getByRole('button', { name: 'Active', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Select' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Name/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Date created/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Status/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Size/ })).toBeVisible()
 
-  await page.getByRole('link', { name: 'Ask' }).click()
-  await page.getByLabel('Prompt').fill('What are the Skyline parking rules?')
+  const scopeTable = page.locator('.ask-scope-table')
+  await page.getByRole('button', { name: /^Name/ }).click()
+  await expect(scopeTable.locator('tbody tr').first().locator('td').nth(1)).toContainText('Alpha-Lease-Agreement.pdf')
+  await page.getByRole('button', { name: /^Date created/ }).click()
+  await expect(scopeTable.locator('tbody tr').first().locator('td').nth(1)).toContainText('Skyline-Mobile-Home-Park-Rules-Regs.pdf')
+
+  await page.getByRole('checkbox', { name: /Skyline-Mobile-Home-Park-Rules-Regs.pdf/i }).check()
   await page.getByRole('button', { name: 'Ask question' }).click()
 
   await expect(page.getByText('Skyline requires vehicles to use designated parking spaces only.')).toBeVisible()
   await expect(page.getByText('Citations (1)')).toBeVisible()
 })
 
+test('shift+enter submits ask question while enter keeps newline behavior', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await enterLegalWorkspace(page)
+  await page.getByRole('link', { name: 'Ask', exact: true }).click()
+
+  const prompt = page.getByLabel('Prompt')
+  await prompt.fill('What are the Skyline parking rules?')
+  await prompt.press('Shift+Enter')
+
+  await expect(page.getByText(/Select at least one document to ask this question/i)).toBeVisible()
+
+  await page.getByRole('checkbox', { name: /Skyline-Mobile-Home-Park-Rules-Regs.pdf/i }).check()
+  await prompt.press('Enter')
+  await expect(page.getByText('Skyline requires vehicles to use designated parking spaces only.')).toHaveCount(0)
+
+  await prompt.press('Shift+Enter')
+  await expect(page.getByText('Skyline requires vehicles to use designated parking spaces only.')).toBeVisible()
+})
+
 test('document upload displays queued then deduped reuse message', async ({ page }) => {
   const state = createBaseState()
   await attachMockApi(page, state)
 
-  await page.goto('/')
-  await page.getByRole('link', { name: 'Documents' }).click()
+  await enterLegalWorkspace(page)
+  await page.getByRole('link', { name: 'Documents', exact: true }).click()
 
   await page.setInputFiles('input[type="file"]', {
     name: 'smoke-query.pdf',
@@ -326,12 +428,51 @@ test('document upload displays queued then deduped reuse message', async ({ page
   await expect(page.getByText(/identical document has already been processed/i)).toBeVisible()
 })
 
+test('documents page can request original file download', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await enterLegalWorkspace(page)
+  await page.getByRole('link', { name: 'Documents', exact: true }).click()
+
+  await page.getByRole('button', { name: 'Download' }).first().click()
+  await expect(page.getByText(/Starting download for/i)).toBeVisible()
+})
+
+test('documents page deletes failed and completed rows with hard-delete warning', async ({ page }) => {
+  const state = createBaseState()
+  state.documents = state.documents.map((document) =>
+    document.document_id === 'doc-2'
+      ? {
+          ...document,
+          processing_status: 'failed',
+        }
+      : document,
+  )
+  await attachMockApi(page, state)
+
+  await enterLegalWorkspace(page)
+  await page.getByRole('link', { name: 'Documents', exact: true }).click()
+
+  const failedRow = page.getByRole('row', { name: /Alpha-Lease-Agreement.pdf/i })
+  await failedRow.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByRole('dialog', { name: 'Delete document' })).toBeVisible()
+  await expect(page.getByText(/remove the row and all linked artifacts/i)).toBeVisible()
+  await page.getByRole('button', { name: 'Delete permanently' }).click()
+  await expect(page.getByRole('row', { name: /Alpha-Lease-Agreement.pdf/i })).toHaveCount(0)
+
+  const completedRow = page.getByRole('row', { name: /Skyline-Mobile-Home-Park-Rules-Regs.pdf/i })
+  await completedRow.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('button', { name: 'Delete permanently' }).click()
+  await expect(page.getByRole('row', { name: /Skyline-Mobile-Home-Park-Rules-Regs.pdf/i })).toHaveCount(0)
+})
+
 test('deleting current session does not leave sticky Not Found error', async ({ page }) => {
   const state = createBaseState()
   await attachMockApi(page, state)
 
-  await page.goto('/')
-  await page.getByRole('link', { name: 'Sessions' }).click()
+  await enterLegalWorkspace(page)
+  await page.getByRole('link', { name: 'Sessions', exact: true }).click()
 
   page.once('dialog', async (dialog) => {
     await dialog.accept()
