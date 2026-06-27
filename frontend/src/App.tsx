@@ -4,7 +4,12 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 
 import { AppLayout } from './app/AppLayout'
 import { getApiSettings, getCurrentSession } from './lib/api/client'
-import { LEGAL_SITE_ID, PDF_BUILDER_SITE_ID, PORTAL_ACCESS_STORAGE_KEY } from './lib/portal/sites'
+import {
+  HUD_LAWS_SITE_ID,
+  LEGAL_SITE_ID,
+  PDF_BUILDER_SITE_ID,
+  PORTAL_ACCESS_STORAGE_KEY,
+} from './lib/portal/sites'
 import {
   initializeOidcUser,
   loginWithOidcPopup,
@@ -14,6 +19,7 @@ import { AskPage } from './pages/AskPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { HelpPage } from './pages/HelpPage'
+import { HudLawsPage } from './pages/HudLawsPage'
 import { PdfBuilderPage } from './pages/PdfBuilderPage'
 import { PortalHomePage } from './pages/PortalHomePage'
 import { SessionsPage } from './pages/SessionsPage'
@@ -166,6 +172,14 @@ function App() {
           element={
             <PortalSiteGate siteId={PDF_BUILDER_SITE_ID}>
               <PdfBuilderPage />
+            </PortalSiteGate>
+          }
+        />
+        <Route
+          path="/hud-laws"
+          element={
+            <PortalSiteGate siteId={HUD_LAWS_SITE_ID}>
+              <HudLawsPage sessionId={sessionId} />
             </PortalSiteGate>
           }
         />

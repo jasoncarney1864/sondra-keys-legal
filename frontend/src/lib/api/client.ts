@@ -4,6 +4,8 @@ import type {
   DocumentListResponse,
   DocumentRecord,
   DocumentUploadResponse,
+  HUDSourceListResponse,
+  HUDSyncResponse,
   QueryRequest,
   QueryResponse,
   SessionCreateResponse,
@@ -235,5 +237,23 @@ export function askQuestion(sessionId: string, payload: QueryRequest) {
     method: 'POST',
     sessionId,
     json: payload,
+  })
+}
+
+export function listHudSources(ensureSynced = true) {
+  const query = new URLSearchParams({
+    ensure_synced: ensureSynced ? 'true' : 'false',
+  })
+
+  return request<HUDSourceListResponse>(`/api/hud/sources?${query.toString()}`)
+}
+
+export function syncHudSources(refresh = false) {
+  const query = new URLSearchParams({
+    refresh: refresh ? 'true' : 'false',
+  })
+
+  return request<HUDSyncResponse>(`/api/hud/sync?${query.toString()}`, {
+    method: 'POST',
   })
 }

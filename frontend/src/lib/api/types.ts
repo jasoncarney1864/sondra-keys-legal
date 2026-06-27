@@ -51,6 +51,32 @@ export interface DocumentListResponse {
   limit: number
 }
 
+export interface HUDSourceRecord {
+  source_id: string
+  document_id: string
+  title: string
+  source_url: string
+  regulation_id: string
+  effective_date: string | null
+  processing_status: string
+  operation: string
+  last_synced_at: string
+}
+
+export interface HUDSourceListResponse {
+  sources: HUDSourceRecord[]
+  total_count: number
+}
+
+export interface HUDSyncResponse {
+  ingested_count: number
+  updated_count: number
+  skipped_count: number
+  failed_count: number
+  sources: HUDSourceRecord[]
+  strategy_note: string
+}
+
 export interface Citation {
   document_id: string
   file_name: string

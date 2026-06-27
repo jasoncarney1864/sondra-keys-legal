@@ -19,10 +19,23 @@ type DocumentRecord = {
   uploaded_by_user_id: string | null
 }
 
+type HudSourceRecord = {
+  source_id: string
+  document_id: string
+  title: string
+  source_url: string
+  regulation_id: string
+  effective_date: string | null
+  processing_status: string
+  operation: string
+  last_synced_at: string
+}
+
 type MockState = {
   currentSessionId: string
   sessions: SessionRecord[]
   documents: DocumentRecord[]
+  hudSources: HudSourceRecord[]
   uploadCalls: number
 }
 
@@ -196,6 +209,31 @@ async function attachMockApi(page: Page, state: MockState) {
     }, 202)
   })
 
+  await page.route('**/api/hud/sources**', async (route) => {
+    return fulfill(route, {
+      sources: state.hudSources,
+      total_count: state.hudSources.length,
+    })
+  })
+
+  await page.route('**/api/hud/sync**', async (route) => {
+    state.hudSources = state.hudSources.map((source) => ({
+      ...source,
+      operation: 'existing',
+      last_synced_at: utcNow(),
+    }))
+
+    return fulfill(route, {
+      ingested_count: 0,
+      updated_count: 0,
+      skipped_count: state.hudSources.length,
+      failed_count: 0,
+      sources: state.hudSources,
+      strategy_note:
+        'HUD User offers free dataset APIs (FMR/Income Limits) but not complete legal text. This endpoint ingests authoritative HUD/public legal-policy sources for grounded Q&A.',
+    })
+  })
+
   await page.route('**/api/query', async (route) => {
     const body = route.request().postDataJSON() as { question: string; document_ids?: string[] }
     const effectiveDocumentIds = body.document_ids?.length ? body.document_ids : []
@@ -271,6 +309,30 @@ function createBaseState(): MockState {
         uploaded_by_user_id: 'local-dev-user',
       },
     ],
+    hudSources: [
+      {
+        source_id: 'fair-housing-act-overview',
+        document_id: 'hud-doc-1',
+        title: 'HUD Fair Housing Act Overview',
+        source_url: 'https://www.hud.gov/program_offices/fair_housing_equal_opp/fair_housing_act_overview',
+        regulation_id: '42 U.S.C. 3601-3619 (Fair Housing Act)',
+        effective_date: '1968-04-11',
+        processing_status: 'completed',
+        operation: 'ingested',
+        last_synced_at: utcNow(),
+      },
+      {
+        source_id: 'cfr-title-24-part-5',
+        document_id: 'hud-doc-2',
+        title: '24 CFR Part 5: General HUD Program Requirements',
+        source_url: 'https://www.ecfr.gov/current/title-24/subtitle-A/part-5',
+        regulation_id: '24 CFR Part 5',
+        effective_date: 'current',
+        processing_status: 'completed',
+        operation: 'ingested',
+        last_synced_at: utcNow(),
+      },
+    ],
     uploadCalls: 0,
   }
 }
@@ -290,6 +352,7 @@ test('portal is default landing page and renders site registry cards', async ({ 
   await expect(page.getByRole('heading', { level: 2, name: /Welcome to Sondra Keys/i })).toBeVisible()
   await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys Legal' })).toBeVisible()
   await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys PDF Builder' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys HUD Laws' })).toBeVisible()
 })
 
 test('portal navigation opens Sondra Keys Legal workspace', async ({ page }) => {
@@ -312,6 +375,17 @@ test('portal navigation opens PDF Builder workspace', async ({ page }) => {
 
   await expect(page).toHaveURL(/\/pdf-builder$/)
   await expect(page.getByRole('heading', { level: 2, name: /Build a PDF from your page images/i })).toBeVisible()
+})
+
+test('portal navigation opens HUD Laws workspace', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Open Sondra Keys HUD Laws' }).click()
+
+  await expect(page).toHaveURL(/\/hud-laws$/)
+  await expect(page.getByRole('heading', { level: 2, name: /HUD Laws and Policy Ask/i })).toBeVisible()
 })
 
 test('direct legacy route redirects to portal then resumes in legal workspace', async ({ page }) => {
@@ -482,4 +556,25 @@ test('deleting current session does not leave sticky Not Found error', async ({ 
 
   await expect(page.getByText(/Not Found/i)).toHaveCount(0)
   await expect(page.getByText('No sessions found.')).toBeVisible()
+})
+
+test('hud laws ask flow enforces scope then returns citation-backed answer', async ({ page }) => {
+  const state = createBaseState()
+  await attachMockApi(page, state)
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Open Sondra Keys HUD Laws' }).click()
+
+  await page.getByLabel('Prompt').fill('What are protected classes under the Fair Housing Act?')
+  await page.getByRole('button', { name: 'Ask HUD laws' }).click()
+  await expect(page.getByText(/Select at least one HUD source document/i)).toBeVisible()
+
+  await page.getByRole('checkbox', { name: /HUD Fair Housing Act Overview/i }).check()
+  await page.getByRole('button', { name: 'Ask HUD laws' }).click()
+
+  await expect(page.getByText('Skyline requires vehicles to use designated parking spaces only.')).toBeVisible()
+  await expect(page.getByText('Citations (1)')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Sync now' }).click()
+  await expect(page.getByText(/Sync completed: \+0 ingested/i)).toBeVisible()
 })
