@@ -13,6 +13,9 @@ param resourceGroupName string = 'rg-sondra-legal-${environment}'
 @description('Container image tag to deploy')
 param imageTag string = 'latest'
 
+@description('When false, skip frontend/backend container app deployment (bootstrap mode).')
+param deployApps bool = true
+
 @description('Existing Azure Cognitive Search service name')
 param searchServiceName string
 
@@ -117,6 +120,7 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
 
 // Backend Container App
 module backendApp 'modules/container-app.bicep' = {
+  if (deployApps)
   scope: rg
   name: 'backend-app-deployment'
   params: {
@@ -210,6 +214,7 @@ module backendApp 'modules/container-app.bicep' = {
 
 // Frontend Container App
 module frontendApp 'modules/container-app.bicep' = {
+  if (deployApps)
   scope: rg
   name: 'frontend-app-deployment'
   params: {
@@ -234,7 +239,7 @@ module frontendApp 'modules/container-app.bicep' = {
 
 // Outputs
 output resourceGroupName string = rg.name
-output frontendUrl string = 'https://${frontendApp.outputs.fqdn}'
-output backendUrl string = 'https://${backendApp.outputs.fqdn}'
+output frontendUrl string = deployApps ? 'https://${frontendApp.outputs.fqdn}' : ''
+output backendUrl string = deployApps ? 'https://${backendApp.outputs.fqdn}' : ''
 output containerRegistryLoginServer string = containerRegistry.outputs.registryLoginServer
 output databaseHost string = database.outputs.fqdn
