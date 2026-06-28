@@ -4,3 +4,8 @@
 
 **/__pycache__/
 *.pyc
+
+# Local development SQLite artifacts
+backend/legal_qa_local.db
+backend/legal_qa_local.db-shm
+backend/legal_qa_local.db-wal
