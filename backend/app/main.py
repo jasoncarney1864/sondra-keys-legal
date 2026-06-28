@@ -78,6 +78,122 @@ logger = structlog.get_logger(__name__)
 
 INDEX_SANITY_LOCK_FILE = "/tmp/startup_index_sanity_check.lock"
 SESSION_RETENTION_LOCK_FILE = "/tmp/startup_session_retention_cleanup.lock"
+
+
+async def validate_azure_openai_deployments() -> None:
+    """
+    Validate that configured Azure OpenAI deployments exist and are accessible.
+
+    Performs lightweight API calls to verify:
+    - Chat completion deployment (AI_OPENAI_DEPLOYMENT_NAME)
+    - Embedding deployment (OPENAI_EMBEDDING_MODEL)
+
+    Logs warnings for missing deployments but does not fail startup.
+    This allows the service to start even if Azure OpenAI is temporarily
+    unavailable, with graceful degradation via fallback responses.
+    """
+    from openai import AsyncAzureOpenAI, APIStatusError
+
+    logger.info("azure_openai_deployment_validation_started")
+
+    client = AsyncAzureOpenAI(
+        api_key=settings.ai.openai_api_key,
+        api_version=settings.ai.openai_api_version,
+        azure_endpoint=str(settings.ai.openai_endpoint),
+    )
+
+    chat_deployment = settings.ai.openai_deployment_name
+    embedding_deployment = settings.openai.embedding_model
+    issues = []
+
+    # Test chat completion deployment
+    try:
+        await client.chat.completions.create(
+            model=chat_deployment,
+            messages=[{"role": "user", "content": "test"}],
+            max_completion_tokens=5,
+        )
+        logger.info(
+            "azure_openai_chat_deployment_validated",
+            deployment=chat_deployment,
+        )
+    except APIStatusError as e:
+        if e.status_code == 404:
+            error_msg = (
+                f"Azure OpenAI chat deployment '{chat_deployment}' not found. "
+                f"Check AI_OPENAI_DEPLOYMENT_NAME configuration. "
+                f"Queries will return fallback context-only responses."
+            )
+            logger.error(
+                "azure_openai_chat_deployment_not_found",
+                deployment=chat_deployment,
+                endpoint=str(settings.ai.openai_endpoint),
+                error=str(e),
+            )
+            issues.append(error_msg)
+        else:
+            logger.warning(
+                "azure_openai_chat_deployment_check_failed",
+                deployment=chat_deployment,
+                status=e.status_code,
+                error=str(e),
+            )
+    except Exception as e:
+        logger.warning(
+            "azure_openai_chat_deployment_check_error",
+            deployment=chat_deployment,
+            error=f"{type(e).__name__}: {e}",
+        )
+
+    # Test embedding deployment
+    try:
+        await client.embeddings.create(
+            model=embedding_deployment,
+            input=["test"],
+        )
+        logger.info(
+            "azure_openai_embedding_deployment_validated",
+            deployment=embedding_deployment,
+        )
+    except APIStatusError as e:
+        if e.status_code == 404:
+            error_msg = (
+                f"Azure OpenAI embedding deployment '{embedding_deployment}' not found. "
+                f"Check OPENAI_EMBEDDING_MODEL configuration or create a deployment. "
+                f"Document indexing and queries will use zero-vector fallback."
+            )
+            logger.error(
+                "azure_openai_embedding_deployment_not_found",
+                deployment=embedding_deployment,
+                endpoint=str(settings.ai.openai_endpoint),
+                error=str(e),
+            )
+            issues.append(error_msg)
+        else:
+            logger.warning(
+                "azure_openai_embedding_deployment_check_failed",
+                deployment=embedding_deployment,
+                status=e.status_code,
+                error=str(e),
+            )
+    except Exception as e:
+        logger.warning(
+            "azure_openai_embedding_deployment_check_error",
+            deployment=embedding_deployment,
+            error=f"{type(e).__name__}: {e}",
+        )
+
+    await client.close()
+
+    if issues:
+        logger.error(
+            "azure_openai_deployment_validation_completed_with_issues",
+            issue_count=len(issues),
+        )
+        for idx, issue in enumerate(issues, 1):
+            logger.error(f"azure_openai_deployment_issue_{idx}", message=issue)
+    else:
+        logger.info("azure_openai_deployment_validation_completed")
 PARSED_JSON_RETENTION_LOCK_FILE = "/tmp/startup_parsed_json_retention_cleanup.lock"
 
 
@@ -544,6 +660,7 @@ async def lifespan(app: FastAPI):
         await cleanup_expired_user_sessions()
         await run_parsed_json_retention_cleanup()
         await run_startup_index_sanity_check()
+        await validate_azure_openai_deployments()
     except Exception as e:
         logger.error(f"database_init_failed: {type(e).__name__}: {e}", exc_info=True)
 

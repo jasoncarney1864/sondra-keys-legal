@@ -21,10 +21,12 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
+from sqlalchemy.exc import OperationalError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
+from backend.app.core.database import init_db
 from backend.app.models.db import (
     DocumentChunkORM,
     DocumentRecordORM,
@@ -147,6 +149,7 @@ class HUDCuratedSourceAdapter(AbstractHUDSourceAdapter):
         r"<(script|style)[^>]*>.*?</\\1>",
         flags=re.IGNORECASE | re.DOTALL,
     )
+    _css_rule_pattern = re.compile(r"\.[A-Za-z0-9_-]+(?:[:]{1,2}[A-Za-z0-9_-]+)?\s*\{")
 
     async def fetch_sources(self) -> list[HUDSourceDocument]:
         documents: list[HUDSourceDocument] = []
@@ -159,8 +162,17 @@ class HUDCuratedSourceAdapter(AbstractHUDSourceAdapter):
 
                 if settings.hud.enable_live_fetch:
                     fetched = await self._fetch_with_retry(client, source["source_url"])
-                    if fetched and len(fetched) >= 400:
+                    if fetched and len(fetched) >= 400 and self._is_usable_source_text(
+                        source_id=source["source_id"],
+                        content=fetched,
+                    ):
                         content = fetched
+                    elif fetched:
+                        logger.warning(
+                            "hud_source_fetch_quality_rejected",
+                            source_id=source["source_id"],
+                            source_url=source["source_url"],
+                        )
 
                 documents.append(
                     HUDSourceDocument(
@@ -226,6 +238,39 @@ class HUDCuratedSourceAdapter(AbstractHUDSourceAdapter):
         decoded = unescape(without_tags)
         normalized = re.sub(r"\\s+", " ", decoded).strip()
         return normalized
+
+    def _is_usable_source_text(self, source_id: str, content: str) -> bool:
+        """Reject low-signal/blocked HTML text and keep high-signal legal source text."""
+        lowered = content.lower()
+
+        blocked_markers = (
+            "request has been flagged as potentially automated",
+            "visit federalregister.gov api documentation",
+            "ecfr.gov api documentation",
+            "access denied",
+            "cloudflare",
+            "enable javascript",
+            "captcha",
+        )
+        if any(marker in lowered for marker in blocked_markers):
+            return False
+
+        # If content looks like CSS-heavy boilerplate, treat it as bad scrape output.
+        css_rule_hits = len(self._css_rule_pattern.findall(content))
+        brace_count = content.count("{") + content.count("}")
+        if css_rule_hits >= 6 or brace_count >= 24:
+            return False
+
+        source_specific_keywords: dict[str, tuple[str, ...]] = {
+            "fair-housing-act-overview": ("fair housing", "discrimination"),
+            "cfr-title-24-part-5": ("part 5", "hud"),
+            "hud-user-datasets-api": ("hud user", "dataset"),
+        }
+        required = source_specific_keywords.get(source_id, ())
+        if required and not any(keyword in lowered for keyword in required):
+            return False
+
+        return True
 
 
 class HUDIngestionService:
@@ -541,7 +586,15 @@ class HUDIngestionService:
         user_id: str,
     ) -> None:
         """Create the user row on-demand for first-time HUD sync callers."""
-        existing = await session.get(UserRecordORM, user_id)
+        try:
+            existing = await session.get(UserRecordORM, user_id)
+        except OperationalError as exc:
+            # Recover from local/dev startup states where SQLite file exists but tables were not created yet.
+            if "no such table" not in str(exc).lower():
+                raise
+            await init_db()
+            existing = await session.get(UserRecordORM, user_id)
+
         if existing is None:
             session.add(UserRecordORM(id=user_id))
             await session.flush()

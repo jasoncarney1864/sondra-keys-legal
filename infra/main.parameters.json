@@ -1,0 +1,85 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "resourceGroupName": {
+      "value": "rg-sondra-legal-dev"
+    },
+    "imageTag": {
+      "value": "latest"
+    },
+    "searchServiceName": {
+      "value": "YOUR_SEARCH_SERVICE_NAME"
+    },
+    "searchIndexName": {
+      "value": "documents"
+    },
+    "storageAccountName": {
+      "value": "YOUR_STORAGE_ACCOUNT_NAME"
+    },
+    "storageContainerName": {
+      "value": "documents"
+    },
+    "documentIntelligenceEndpoint": {
+      "value": "YOUR_DOCUMENT_INTELLIGENCE_ENDPOINT"
+    },
+    "openAIEndpoint": {
+      "value": "https://sondra-legal-project-resource.openai.azure.com/"
+    },
+    "openAIDeploymentName": {
+      "value": "YOUR_GPT5_DEPLOYMENT_NAME"
+    },
+    "openAIApiVersion": {
+      "value": "2024-10-21"
+    },
+    "databaseAdminUsername": {
+      "value": "sondra_admin"
+    },
+    "databaseAdminPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/YOUR_KEYVAULT_RG/providers/Microsoft.KeyVault/vaults/YOUR_KEYVAULT_NAME"
+        },
+        "secretName": "database-admin-password"
+      }
+    },
+    "searchApiKey": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/YOUR_KEYVAULT_RG/providers/Microsoft.KeyVault/vaults/YOUR_KEYVAULT_NAME"
+        },
+        "secretName": "search-api-key"
+      }
+    },
+    "storageConnectionString": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/YOUR_KEYVAULT_RG/providers/Microsoft.KeyVault/vaults/YOUR_KEYVAULT_NAME"
+        },
+        "secretName": "storage-connection-string"
+      }
+    },
+    "documentIntelligenceApiKey": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/YOUR_KEYVAULT_RG/providers/Microsoft.KeyVault/vaults/YOUR_KEYVAULT_NAME"
+        },
+        "secretName": "document-intelligence-key"
+      }
+    },
+    "openAIApiKey": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/YOUR_KEYVAULT_RG/providers/Microsoft.KeyVault/vaults/YOUR_KEYVAULT_NAME"
+        },
+        "secretName": "openai-api-key"
+      }
+    }
+  }
+}

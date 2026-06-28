@@ -6,7 +6,9 @@ import {
   deleteDocument,
   downloadDocument,
   getDocumentDownloadUrl,
+  listHudSources,
   listDocuments,
+  syncHudSources,
   uploadDocument,
 } from '../lib/api/client'
 import { formatDateTime, formatFileSize } from '../lib/format'
@@ -16,15 +18,37 @@ type DocumentsPageProps = {
   currentUserId: string | null
 }
 
+type DocumentSourceFilter = 'all' | 'uploads' | 'hud'
+
+function isHudDocument(document: { uploaded_by_user_id: string | null; file_name: string }) {
+  return document.uploaded_by_user_id === null && document.file_name.trim().startsWith('[HUD]')
+}
+
 export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) {
   const [file, setFile] = useState<File | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sourceFilter, setSourceFilter] = useState<DocumentSourceFilter>('all')
   const [documentPendingDelete, setDocumentPendingDelete] = useState<{
     documentId: string
     fileName: string
   } | null>(null)
   const queryClient = useQueryClient()
+
+  const hudSourcesQuery = useQuery({
+    queryKey: ['hud', 'sources', 'documents-page'],
+    queryFn: () => listHudSources(false),
+  })
+
+  const hudSyncMutation = useMutation({
+    mutationFn: async (refresh: boolean) => syncHudSources(refresh),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['documents'] }),
+        queryClient.invalidateQueries({ queryKey: ['hud', 'sources', 'documents-page'] }),
+      ])
+    },
+  })
 
   const documentsQuery = useQuery({
     queryKey: ['documents'],
@@ -137,6 +161,39 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
     })
   }, [documentsQuery.data?.documents])
 
+  const sourceCounts = useMemo(() => {
+    let hud = 0
+    let uploads = 0
+
+    for (const document of sortedDocuments) {
+      if (isHudDocument(document)) {
+        hud += 1
+      } else {
+        uploads += 1
+      }
+    }
+
+    return {
+      all: sortedDocuments.length,
+      uploads,
+      hud,
+    }
+  }, [sortedDocuments])
+
+  const filteredDocuments = useMemo(() => {
+    if (sourceFilter === 'all') {
+      return sortedDocuments
+    }
+
+    return sortedDocuments.filter((document) => {
+      const hudDocument = isHudDocument(document)
+      if (sourceFilter === 'hud') {
+        return hudDocument
+      }
+      return !hudDocument
+    })
+  }, [sortedDocuments, sourceFilter])
+
   function onUploadSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!file) {
@@ -159,6 +216,52 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
           </p>
         </div>
       </header>
+
+      <div className="card">
+        <div className="card-title-row">
+          <h3>HUD source sync</h3>
+          <p className="muted">Sources: {hudSourcesQuery.data?.total_count ?? 0}</p>
+        </div>
+
+        <p className="muted">
+          Pull authoritative HUD/public legal-policy sources directly into this Documents list.
+          Synced HUD records appear alongside uploaded files.
+        </p>
+
+        <div className="row-actions">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => hudSyncMutation.mutate(false)}
+            disabled={hudSyncMutation.isPending}
+          >
+            {hudSyncMutation.isPending ? 'Syncing...' : 'Sync now'}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => hudSyncMutation.mutate(true)}
+            disabled={hudSyncMutation.isPending}
+          >
+            Force refresh
+          </button>
+        </div>
+
+        {hudSyncMutation.data ? (
+          <p className="notice success">
+            Sync completed: +{hudSyncMutation.data.ingested_count} ingested, {hudSyncMutation.data.updated_count}{' '}
+            updated, {hudSyncMutation.data.skipped_count} skipped, {hudSyncMutation.data.failed_count} failed.
+          </p>
+        ) : null}
+
+        {hudSyncMutation.isError ? (
+          <p className="notice error">{(hudSyncMutation.error as Error).message}</p>
+        ) : null}
+
+        {hudSourcesQuery.isError ? (
+          <p className="notice error">{(hudSourcesQuery.error as Error).message}</p>
+        ) : null}
+      </div>
 
       <div className="card">
         <h3>Upload document</h3>
@@ -186,14 +289,40 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
       <div className="card">
         <div className="card-title-row">
           <h3>Known documents</h3>
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => documentsQuery.refetch()}
-            disabled={documentsQuery.isFetching}
-          >
-            Refresh
-          </button>
+          <div className="row-actions">
+            <button
+              type="button"
+              className={sourceFilter === 'all' ? 'primary' : 'ghost'}
+              onClick={() => setSourceFilter('all')}
+              aria-pressed={sourceFilter === 'all'}
+            >
+              All ({sourceCounts.all})
+            </button>
+            <button
+              type="button"
+              className={sourceFilter === 'uploads' ? 'primary' : 'ghost'}
+              onClick={() => setSourceFilter('uploads')}
+              aria-pressed={sourceFilter === 'uploads'}
+            >
+              User docs ({sourceCounts.uploads})
+            </button>
+            <button
+              type="button"
+              className={sourceFilter === 'hud' ? 'primary' : 'ghost'}
+              onClick={() => setSourceFilter('hud')}
+              aria-pressed={sourceFilter === 'hud'}
+            >
+              HUD sync ({sourceCounts.hud})
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => documentsQuery.refetch()}
+              disabled={documentsQuery.isFetching}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
         {documentsQuery.isLoading ? <p className="muted">Loading documents...</p> : null}
@@ -201,16 +330,24 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
           <p className="notice error">{(documentsQuery.error as Error).message}</p>
         ) : null}
 
-        {sortedDocuments.length === 0 ? (
+        {filteredDocuments.length === 0 ? (
           <div className="stack-form">
-            <p className="muted">No documents found in Known documents.</p>
-            {sessionId ? (
-              <p className="muted">
-                Current user context: <span className="mono">{currentUserId ?? 'resolving-user'}</span>.
-                Upload a file in this session to create a user-linked record.
-              </p>
+            {sourceCounts.all === 0 ? (
+              <>
+                <p className="muted">No documents found in Known documents.</p>
+                {sessionId ? (
+                  <p className="muted">
+                    Current user context: <span className="mono">{currentUserId ?? 'resolving-user'}</span>.
+                    Upload a file in this session to create a user-linked record.
+                  </p>
+                ) : (
+                  <p className="muted">Select or create a session first, then upload to populate this grid.</p>
+                )}
+              </>
             ) : (
-              <p className="muted">Select or create a session first, then upload to populate this grid.</p>
+              <p className="muted">
+                No {sourceFilter === 'hud' ? 'HUD sync' : 'uploaded'} documents match this filter.
+              </p>
             )}
           </div>
         ) : (
@@ -219,6 +356,7 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
               <thead>
                 <tr>
                   <th>File</th>
+                  <th>Source</th>
                   <th>Status</th>
                   <th>Size</th>
                   <th>Uploaded</th>
@@ -226,7 +364,7 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
                 </tr>
               </thead>
               <tbody>
-                {sortedDocuments.map((document) => (
+                {filteredDocuments.map((document) => (
                   <DocumentRow
                     key={document.document_id}
                     document={document}
@@ -284,6 +422,7 @@ type DocumentRowProps = {
     file_size_bytes: number
     upload_timestamp: string
     processing_status: string
+    uploaded_by_user_id: string | null
   }
   isDownloading: boolean
   isDeleting: boolean
@@ -292,10 +431,17 @@ type DocumentRowProps = {
 }
 
 function DocumentRow({ document, isDownloading, isDeleting, onDownload, onDelete }: DocumentRowProps) {
+  const isHudSource = isHudDocument(document)
+
   return (
     <tr>
       <td>
         <p className="cell-title">{document.file_name}</p>
+      </td>
+      <td>
+        <span className={`source-pill ${isHudSource ? 'hud' : 'uploaded'}`}>
+          {isHudSource ? 'HUD sync' : 'Upload'}
+        </span>
       </td>
       <td>
         <span className={`status-pill ${document.processing_status.toLowerCase()}`}>

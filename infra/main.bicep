@@ -1,0 +1,240 @@
+targetScope = 'subscription'
+
+@description('Environment name (dev, staging, prod)')
+@allowed(['dev', 'staging', 'prod'])
+param environment string = 'dev'
+
+@description('Primary Azure region for resources')
+param location string = 'eastus'
+
+@description('Resource group name')
+param resourceGroupName string = 'rg-sondra-legal-${environment}'
+
+@description('Container image tag to deploy')
+param imageTag string = 'latest'
+
+@description('Existing Azure Cognitive Search service name')
+param searchServiceName string
+
+@description('Existing Azure Cognitive Search index name')
+param searchIndexName string = 'documents'
+
+@description('Existing Azure Blob Storage account name')
+param storageAccountName string
+
+@description('Existing Azure Blob Storage container name')
+param storageContainerName string = 'documents'
+
+@description('Existing Azure Document Intelligence endpoint')
+param documentIntelligenceEndpoint string
+
+@description('Azure OpenAI endpoint (Foundry)')
+param openAIEndpoint string
+
+@description('Azure OpenAI deployment name')
+param openAIDeploymentName string
+
+@description('Azure OpenAI API version')
+param openAIApiVersion string = '2024-10-21'
+
+@description('Database administrator username')
+@secure()
+param databaseAdminUsername string
+
+@description('Database administrator password')
+@secure()
+param databaseAdminPassword string
+
+@description('Azure Cognitive Search API key')
+@secure()
+param searchApiKey string
+
+@description('Azure Blob Storage connection string')
+@secure()
+param storageConnectionString string
+
+@description('Azure Document Intelligence API key')
+@secure()
+param documentIntelligenceApiKey string
+
+@description('Azure OpenAI API key')
+@secure()
+param openAIApiKey string
+
+// Resource group
+resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: resourceGroupName
+  location: location
+  tags: {
+    environment: environment
+    project: 'sondra-keys-legal'
+    managedBy: 'bicep'
+  }
+}
+
+// Monitoring module
+module monitoring 'modules/monitoring.bicep' = {
+  scope: rg
+  name: 'monitoring-deployment'
+  params: {
+    location: location
+    environment: environment
+  }
+}
+
+// Container Registry module
+module containerRegistry 'modules/container-registry.bicep' = {
+  scope: rg
+  name: 'acr-deployment'
+  params: {
+    location: location
+    environment: environment
+  }
+}
+
+// PostgreSQL module
+module database 'modules/postgresql.bicep' = {
+  scope: rg
+  name: 'postgresql-deployment'
+  params: {
+    location: location
+    environment: environment
+    administratorLogin: databaseAdminUsername
+    administratorPassword: databaseAdminPassword
+  }
+}
+
+// Container Apps Environment module
+module containerAppsEnv 'modules/container-apps-env.bicep' = {
+  scope: rg
+  name: 'containerapp-env-deployment'
+  params: {
+    location: location
+    environment: environment
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+  }
+}
+
+// Backend Container App
+module backendApp 'modules/container-app.bicep' = {
+  scope: rg
+  name: 'backend-app-deployment'
+  params: {
+    location: location
+    environment: environment
+    appName: 'backend'
+    containerAppsEnvironmentId: containerAppsEnv.outputs.environmentId
+    containerRegistryName: containerRegistry.outputs.registryName
+    containerImage: '${containerRegistry.outputs.registryLoginServer}/sondra-legal-backend:${imageTag}'
+    targetPort: 8000
+    minReplicas: 1
+    maxReplicas: 3
+    environmentVariables: [
+      {
+        name: 'DATABASE_URL'
+        value: 'postgresql://${databaseAdminUsername}:${databaseAdminPassword}@${database.outputs.fqdn}:5432/sondra_legal'
+      }
+      {
+        name: 'AI_SEARCH_SERVICE_NAME'
+        value: searchServiceName
+      }
+      {
+        name: 'AI_SEARCH_INDEX_NAME'
+        value: searchIndexName
+      }
+      {
+        name: 'AI_SEARCH_API_KEY'
+        secretRef: 'search-api-key'
+      }
+      {
+        name: 'AZURE_STORAGE_CONNECTION_STRING'
+        secretRef: 'storage-connection-string'
+      }
+      {
+        name: 'AZURE_STORAGE_CONTAINER_NAME'
+        value: storageContainerName
+      }
+      {
+        name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
+        value: documentIntelligenceEndpoint
+      }
+      {
+        name: 'AZURE_DOCUMENT_INTELLIGENCE_KEY'
+        secretRef: 'doc-intelligence-key'
+      }
+      {
+        name: 'AI_OPENAI_ENDPOINT'
+        value: openAIEndpoint
+      }
+      {
+        name: 'AI_OPENAI_DEPLOYMENT_NAME'
+        value: openAIDeploymentName
+      }
+      {
+        name: 'AI_OPENAI_API_VERSION'
+        value: openAIApiVersion
+      }
+      {
+        name: 'AI_OPENAI_API_KEY'
+        secretRef: 'openai-api-key'
+      }
+      {
+        name: 'OPENAI_API_KEY'
+        secretRef: 'openai-api-key'
+      }
+      {
+        name: 'ENVIRONMENT'
+        value: environment
+      }
+    ]
+    secrets: [
+      {
+        name: 'search-api-key'
+        value: searchApiKey
+      }
+      {
+        name: 'storage-connection-string'
+        value: storageConnectionString
+      }
+      {
+        name: 'doc-intelligence-key'
+        value: documentIntelligenceApiKey
+      }
+      {
+        name: 'openai-api-key'
+        value: openAIApiKey
+      }
+    ]
+  }
+}
+
+// Frontend Container App
+module frontendApp 'modules/container-app.bicep' = {
+  scope: rg
+  name: 'frontend-app-deployment'
+  params: {
+    location: location
+    environment: environment
+    appName: 'frontend'
+    containerAppsEnvironmentId: containerAppsEnv.outputs.environmentId
+    containerRegistryName: containerRegistry.outputs.registryName
+    containerImage: '${containerRegistry.outputs.registryLoginServer}/sondra-legal-frontend:${imageTag}'
+    targetPort: 80
+    minReplicas: 1
+    maxReplicas: 5
+    environmentVariables: [
+      {
+        name: 'VITE_API_BASE_URL'
+        value: 'https://${backendApp.outputs.fqdn}'
+      }
+    ]
+    secrets: []
+  }
+}
+
+// Outputs
+output resourceGroupName string = rg.name
+output frontendUrl string = 'https://${frontendApp.outputs.fqdn}'
+output backendUrl string = 'https://${backendApp.outputs.fqdn}'
+output containerRegistryLoginServer string = containerRegistry.outputs.registryLoginServer
+output databaseHost string = database.outputs.fqdn

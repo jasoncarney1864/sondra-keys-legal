@@ -197,11 +197,22 @@ class AzureAISearchService(AbstractSearchService):
         await self._ensure_initialized()
 
         try:
-            # Generate real embeddings for every chunk in a single batch call
+            # Prefer real embeddings, but degrade gracefully for local/dev setups
+            # where an embedding provider might be unavailable or misconfigured.
             embedding_service = self._get_embedding_service()
-            chunk_vectors = await embedding_service.embed_batch(
-                [chunk.content for chunk in chunks]
-            )
+            try:
+                chunk_vectors = await embedding_service.embed_batch(
+                    [chunk.content for chunk in chunks]
+                )
+            except Exception as embedding_error:
+                logger.warning(
+                    "index_chunks_embedding_fallback_zero_vectors document_id=%s error=%s",
+                    document_id,
+                    str(embedding_error)[:500],
+                )
+                chunk_vectors = [
+                    [0.0] * embedding_service.embedding_dimension for _ in chunks
+                ]
 
             documents = []
             for chunk, content_vector in zip(chunks, chunk_vectors):

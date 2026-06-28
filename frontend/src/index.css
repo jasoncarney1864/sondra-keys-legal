@@ -656,6 +656,24 @@ th {
   font-weight: 700;
 }
 
+.source-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+  padding: 0.22rem 0.62rem;
+  border-radius: 999px;
+  border-color: #0a5443;
+  font-size: 0.82rem;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+}
+
+.source-link-button:hover {
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
 .status-pill {
   display: inline-block;
   border-radius: 999px;
@@ -679,6 +697,26 @@ th {
 .status-pill.chunking,
 .status-pill.indexing {
   color: var(--warn);
+}
+
+.source-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid currentColor;
+}
+
+.source-pill.hud {
+  color: #0d5b4a;
+  background: rgba(14, 106, 86, 0.08);
+}
+
+.source-pill.uploaded {
+  color: #7a5b20;
+  background: rgba(191, 142, 55, 0.1);
 }
 
 .inline-checkbox {

@@ -88,7 +88,7 @@ class AISettings(BaseSettings):
         description="Azure OpenAI deployment name (e.g., 'gpt-4')"
     )
     openai_api_version: str = Field(
-        default="2024-02-15-preview",
+        default="2024-10-21",
         description="Azure OpenAI API version"
     )
 

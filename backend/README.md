@@ -186,6 +186,38 @@ SECURITY_API_KEY=your-secure-key
    - API key
    - Deployment name (e.g., "gpt-4")
 
+### Azure OpenAI Deployment Setup
+
+The application requires two Azure OpenAI **deployments** in your Azure OpenAI resource:
+
+1. **Chat Completion Deployment** (for Q&A generation)
+   - Create a deployment for a chat model (e.g., `gpt-4o`, `gpt-4`, `gpt-35-turbo`)
+   - Set `AI_OPENAI_DEPLOYMENT_NAME` to match your deployment name exactly
+   - Example: If you create a deployment called `gpt-4o-legal`, use:
+     ```
+     AI_OPENAI_DEPLOYMENT_NAME=gpt-4o-legal
+     ```
+
+2. **Embeddings Deployment** (for vector search)
+   - Create a deployment for an embeddings model (e.g., `text-embedding-3-small`, `text-embedding-ada-002`)
+   - Set `OPENAI_EMBEDDING_MODEL` to match your deployment name exactly
+   - Example: If you create a deployment called `text-embedding-3-small`, use:
+     ```
+     OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+     ```
+
+**Important Notes:**
+- The deployment **name** in Azure OpenAI can differ from the model **type**
+- You must create these deployments in your Azure OpenAI resource before starting the backend
+- At startup, the backend will validate these deployments exist and log clear errors if missing
+- Without valid deployments, queries will return fallback context-only responses
+
+**To create deployments:**
+1. Go to Azure Portal → Your Azure OpenAI resource → Model deployments
+2. Click "Create new deployment"
+3. Choose your model and give it a deployment name
+4. Update your `.env` file with the exact deployment names
+
 ## Testing
 
 ### Run Unit Tests

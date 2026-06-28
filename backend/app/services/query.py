@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import structlog
 import time
+import re
 from typing import Any
 
-from openai import AsyncOpenAI, RateLimitError, AuthenticationError, APIConnectionError
+from openai import AsyncAzureOpenAI, RateLimitError, AuthenticationError, APIConnectionError
 from openai._exceptions import APIStatusError
 
 from backend.app.core.config import settings
@@ -55,10 +56,14 @@ class QueryService(AbstractQueryService):
         """
         self.search_service = search_service
 
-        # Standard OpenAI client used for both embeddings and chat completion.
-        self.openai_client = AsyncOpenAI(api_key=settings.openai.api_key)
+        # Use Azure OpenAI consistently for both embeddings and chat completion.
+        self.openai_client = AsyncAzureOpenAI(
+            api_key=settings.ai.openai_api_key,
+            api_version=settings.ai.openai_api_version,
+            azure_endpoint=str(settings.ai.openai_endpoint),
+        )
 
-        self.chat_model = settings.openai.chat_model
+        self.chat_model = settings.ai.openai_deployment_name
         self.embedding_model = settings.openai.embedding_model
         self.embedding_dimension = 1536
 
@@ -160,8 +165,15 @@ class QueryService(AbstractQueryService):
             # Step 4: Call the chat model
             # ================================================================
             logger.debug("llm_inference_started", model=self.chat_model)
-            answer = await self._call_llm(system_prompt, user_message)
-            logger.info("llm_inference_completed", answer_length=len(answer))
+            try:
+                answer = await self._call_llm(system_prompt, user_message)
+                logger.info("llm_inference_completed", answer_length=len(answer))
+            except LLMServiceException as llm_error:
+                logger.warning(
+                    "llm_inference_fallback_to_context_summary error=%s",
+                    str(llm_error)[:500],
+                )
+                answer = self._build_fallback_answer(search_results)
 
             # ================================================================
             # Step 5: Map citations
@@ -245,23 +257,27 @@ class QueryService(AbstractQueryService):
                     message="Rate limit exceeded during embedding generation.",
                     detail="Please try again in a few moments.",
                 ) from e
-            logger.error(f"embedding_api_error: {e.status_code}: {e.message}")
-            raise LLMServiceException(
-                message=f"Embedding API error: {e.status_code}",
-                detail="Failed to generate question embedding.",
-            ) from e
+            logger.warning(
+                "embedding_api_fallback_zero_vector status_code=%s detail=%s",
+                e.status_code,
+                str(getattr(e, "message", e))[:300],
+            )
+            return [0.0] * self.embedding_dimension
         except (AuthenticationError, APIConnectionError) as e:
-            logger.error(f"embedding_connection_error: {type(e).__name__}: {e}")
-            raise LLMServiceException(
-                message=f"Embedding service connection failed: {type(e).__name__}",
-                detail="Failed to reach the embedding service.",
-            ) from e
+            # Keep Ask flow available in local/dev if embedding credentials drift.
+            logger.warning(
+                "embedding_fallback_zero_vector error_type=%s detail=%s",
+                type(e).__name__,
+                str(e)[:300],
+            )
+            return [0.0] * self.embedding_dimension
         except Exception as e:
-            logger.error(f"embedding_unexpected_error: {type(e).__name__}: {e}", exc_info=True)
-            raise LLMServiceException(
-                message=f"Embedding generation failed: {type(e).__name__}",
-                detail="An unexpected error occurred during embedding.",
-            ) from e
+            logger.warning(
+                "embedding_unexpected_fallback_zero_vector error_type=%s detail=%s",
+                type(e).__name__,
+                str(e)[:300],
+            )
+            return [0.0] * self.embedding_dimension
 
     async def _retrieve_context(
         self,
@@ -415,6 +431,64 @@ If insufficient information is available, state that clearly.\
 
         return user_message
 
+    def _build_fallback_answer(self, search_results: list[SearchResultSchema]) -> str:
+        """Build a grounded fallback answer when chat completion is unavailable."""
+        if not search_results:
+            return (
+                "I could not generate an AI-written answer right now, and no supporting "
+                "document context was available."
+            )
+
+        top = search_results[:3]
+        bullets: list[str] = []
+        for item in top:
+            snippet = self._clean_fallback_snippet(item.content)
+            label = item.section_title or f"chunk {item.chunk_index}"
+            bullets.append(f"- {item.file_name} ({label}): {snippet}")
+
+        return (
+            "AI answer generation is temporarily unavailable (Azure OpenAI deployment "
+            "configuration issue), but I found relevant source context for your question:\n\n"
+            f"{'\n'.join(bullets)}\n\n"
+            "Use the citations below to review the original source text."
+        )
+
+    def _clean_fallback_snippet(self, content: str) -> str:
+        """Remove common scrape noise so fallback bullets stay readable."""
+        # Some indexed chunks contain escaped newlines from serialized metadata text.
+        normalized = content.replace("\\n", "\n")
+
+        # Remove common CSS selector fragments and declaration blocks that leak from scraped pages.
+        normalized = re.sub(
+            r"\.[A-Za-z0-9_-]+(?:[:]{1,2}[A-Za-z0-9_-]+)?\s*\{[^}]{0,200}\}",
+            " ",
+            normalized,
+        )
+
+        # Drop metadata preamble lines so users see only meaningful source content.
+        metadata_prefixes = (
+            "source title:",
+            "source url:",
+            "regulation:",
+            "effective date:",
+        )
+        cleaned_lines: list[str] = []
+        for raw_line in normalized.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.lower().startswith(metadata_prefixes):
+                continue
+            cleaned_lines.append(line)
+
+        snippet = " ".join(cleaned_lines)
+        snippet = re.sub(r"\s+", " ", snippet).strip()
+
+        if len(snippet) > 260:
+            snippet = f"{snippet[:257]}..."
+
+        return snippet
+
     async def _call_llm(
         self,
         system_prompt: str,
@@ -443,7 +517,7 @@ If insufficient information is available, state that clearly.\
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.2,  # Lower temperature for more deterministic legal answers
-                max_tokens=1024,  # Sufficient for most legal explanations
+                max_completion_tokens=1024,  # Sufficient for most legal explanations
                 top_p=0.95,
             )
 

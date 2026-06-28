@@ -352,7 +352,6 @@ test('portal is default landing page and renders site registry cards', async ({ 
   await expect(page.getByRole('heading', { level: 2, name: /Welcome to Sondra Keys/i })).toBeVisible()
   await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys Legal' })).toBeVisible()
   await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys PDF Builder' })).toBeVisible()
-  await expect(page.getByRole('heading', { level: 3, name: 'Sondra Keys HUD Laws' })).toBeVisible()
 })
 
 test('portal navigation opens Sondra Keys Legal workspace', async ({ page }) => {
@@ -375,17 +374,6 @@ test('portal navigation opens PDF Builder workspace', async ({ page }) => {
 
   await expect(page).toHaveURL(/\/pdf-builder$/)
   await expect(page.getByRole('heading', { level: 2, name: /Build a PDF from your page images/i })).toBeVisible()
-})
-
-test('portal navigation opens HUD Laws workspace', async ({ page }) => {
-  const state = createBaseState()
-  await attachMockApi(page, state)
-
-  await page.goto('/')
-  await page.getByRole('button', { name: 'Open Sondra Keys HUD Laws' }).click()
-
-  await expect(page).toHaveURL(/\/hud-laws$/)
-  await expect(page.getByRole('heading', { level: 2, name: /HUD Laws and Policy Ask/i })).toBeVisible()
 })
 
 test('direct legacy route redirects to portal then resumes in legal workspace', async ({ page }) => {
@@ -556,25 +544,4 @@ test('deleting current session does not leave sticky Not Found error', async ({ 
 
   await expect(page.getByText(/Not Found/i)).toHaveCount(0)
   await expect(page.getByText('No sessions found.')).toBeVisible()
-})
-
-test('hud laws ask flow enforces scope then returns citation-backed answer', async ({ page }) => {
-  const state = createBaseState()
-  await attachMockApi(page, state)
-
-  await page.goto('/')
-  await page.getByRole('button', { name: 'Open Sondra Keys HUD Laws' }).click()
-
-  await page.getByLabel('Prompt').fill('What are protected classes under the Fair Housing Act?')
-  await page.getByRole('button', { name: 'Ask HUD laws' }).click()
-  await expect(page.getByText(/Select at least one HUD source document/i)).toBeVisible()
-
-  await page.getByRole('checkbox', { name: /HUD Fair Housing Act Overview/i }).check()
-  await page.getByRole('button', { name: 'Ask HUD laws' }).click()
-
-  await expect(page.getByText('Skyline requires vehicles to use designated parking spaces only.')).toBeVisible()
-  await expect(page.getByText('Citations (1)')).toBeVisible()
-
-  await page.getByRole('button', { name: 'Sync now' }).click()
-  await expect(page.getByText(/Sync completed: \+0 ingested/i)).toBeVisible()
 })

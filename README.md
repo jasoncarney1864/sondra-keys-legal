@@ -26,3 +26,19 @@ Environment variables (prefix `HUD_`):
 - `HUD_FETCH_MAX_RETRIES`
 - `HUD_FETCH_BACKOFF_SECONDS`
 - `HUD_USER_API_TOKEN` (optional)
+
+## Local startup helper
+
+To avoid local API key mismatches between frontend and backend, use:
+
+```powershell
+pwsh -File backend/scripts/start_local_dev.ps1
+```
+
+What it does:
+- Reads `VITE_API_KEY` from `frontend/.env.local`.
+- Loads required backend Azure/OpenAI settings from process environment or `backend/.env.local` (`backend/.env` fallback).
+- Starts the frontend Vite server in a separate PowerShell window.
+- Starts the backend and sets `SECURITY_API_KEY` to match the frontend key.
+
+If required backend Azure/OpenAI settings are missing, the script exits with a list of missing variable names.

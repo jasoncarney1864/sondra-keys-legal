@@ -13,7 +13,6 @@ export type PortalSite = {
 export const PORTAL_ACCESS_STORAGE_KEY = 'sondra.portal.entry_site'
 export const LEGAL_SITE_ID = 'sondra-keys-legal'
 export const PDF_BUILDER_SITE_ID = 'sondra-keys-pdf-builder'
-export const HUD_LAWS_SITE_ID = 'sondra-keys-hud-laws'
 
 export const portalSites: PortalSite[] = [
   {
@@ -35,16 +34,6 @@ export const portalSites: PortalSite[] = [
     status: 'active',
     visible: true,
     icon: 'Pages',
-  },
-  {
-    id: HUD_LAWS_SITE_ID,
-    title: 'Sondra Keys HUD Laws',
-    description:
-      'HUD-focused legal and policy Q&A with curated authoritative sources, explicit source scope, and citations.',
-    route: '/hud-laws',
-    status: 'active',
-    visible: true,
-    icon: 'Gov',
   },
 ]
 
