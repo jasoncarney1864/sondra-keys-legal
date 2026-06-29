@@ -446,10 +446,12 @@ If insufficient information is available, state that clearly.\
             label = item.section_title or f"chunk {item.chunk_index}"
             bullets.append(f"- {item.file_name} ({label}): {snippet}")
 
+        bullet_block = "\n".join(bullets)
+
         return (
             "AI answer generation is temporarily unavailable (Azure OpenAI deployment "
             "configuration issue), but I found relevant source context for your question:\n\n"
-            f"{'\n'.join(bullets)}\n\n"
+            f"{bullet_block}\n\n"
             "Use the citations below to review the original source text."
         )
 
