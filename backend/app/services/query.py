@@ -15,6 +15,8 @@ import structlog
 import time
 import re
 from typing import Any
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
 
 from openai import AsyncAzureOpenAI, RateLimitError, AuthenticationError, APIConnectionError
 from openai._exceptions import APIStatusError
@@ -37,6 +39,21 @@ from backend.app.services.interfaces import (
 )
 
 logger = structlog.get_logger(__name__)
+tracer = trace.get_tracer(__name__)
+
+
+def _set_span_attr(span, key: str, value: Any) -> None:
+    """Set a span attribute only when the value is representable."""
+    if value is None:
+        return
+    if isinstance(value, (str, bool, int, float)):
+        span.set_attribute(key, value)
+        return
+    if isinstance(value, list):
+        normalized = [str(item) for item in value]
+        span.set_attribute(key, normalized)
+        return
+    span.set_attribute(key, str(value))
 
 
 class QueryService(AbstractQueryService):
@@ -108,116 +125,154 @@ class QueryService(AbstractQueryService):
             max_citations=request.max_citations,
         )
 
-        try:
-            # ================================================================
-            # Step 1: Vectorize the question
-            # ================================================================
-            logger.debug("embedding_question_started")
-            query_vector = await self._embed_question(request.question)
-            logger.debug("embedding_question_completed", vector_dim=len(query_vector))
-
-            # ================================================================
-            # Step 2: Retrieve relevant chunks via hybrid search
-            # ================================================================
-            logger.debug("hybrid_search_started", top_k=request.top_k)
-            search_results = await self._retrieve_context(
-                question=request.question,
-                query_vector=query_vector,
-                top_k=request.top_k,
-                document_ids=request.document_ids,
-            )
-            logger.info(
-                "hybrid_search_completed",
-                chunks_retrieved=len(search_results),
+        with tracer.start_as_current_span("rag.answer_query", kind=SpanKind.INTERNAL) as span:
+            _set_span_attr(span, "rag.top_k", request.top_k)
+            _set_span_attr(span, "rag.max_citations", request.max_citations)
+            _set_span_attr(span, "rag.question.length", len(request.question))
+            _set_span_attr(
+                span,
+                "rag.document_scope.count",
+                len(request.document_ids) if request.document_ids else 0,
             )
 
-            if not search_results:
-                logger.warning("no_context_retrieved_for_question")
-                answer = (
-                    "I was unable to find relevant information in the indexed "
-                    "documents to answer your question. Please refine your query "
-                    "or upload additional documents."
+            try:
+                # ================================================================
+                # Step 1: Vectorize the question
+                # ================================================================
+                logger.debug("embedding_question_started")
+                with tracer.start_as_current_span("rag.embed_question") as embed_span:
+                    _set_span_attr(embed_span, "rag.question.length", len(request.question))
+                    query_vector = await self._embed_question(request.question)
+                    _set_span_attr(embed_span, "embedding.vector.dim", len(query_vector))
+                logger.debug("embedding_question_completed", vector_dim=len(query_vector))
+
+                # ================================================================
+                # Step 2: Retrieve relevant chunks via hybrid search
+                # ================================================================
+                logger.debug("hybrid_search_started", top_k=request.top_k)
+                with tracer.start_as_current_span("rag.retrieve_context") as retrieve_span:
+                    _set_span_attr(retrieve_span, "rag.top_k", request.top_k)
+                    _set_span_attr(
+                        retrieve_span,
+                        "rag.document_scope.count",
+                        len(request.document_ids) if request.document_ids else 0,
+                    )
+                    search_results = await self._retrieve_context(
+                        question=request.question,
+                        query_vector=query_vector,
+                        top_k=request.top_k,
+                        document_ids=request.document_ids,
+                    )
+                    _set_span_attr(retrieve_span, "rag.search_results.count", len(search_results))
+                logger.info(
+                    "hybrid_search_completed",
+                    chunks_retrieved=len(search_results),
                 )
+                _set_span_attr(span, "rag.search_results.count", len(search_results))
+
+                if not search_results:
+                    logger.warning("no_context_retrieved_for_question")
+                    answer = (
+                        "I was unable to find relevant information in the indexed "
+                        "documents to answer your question. Please refine your query "
+                        "or upload additional documents."
+                    )
+                    _set_span_attr(span, "rag.answer.mode", "no_context")
+                    return QueryResponse(
+                        question=request.question,
+                        answer=answer,
+                        citations=[],
+                        model_used=self.chat_model,
+                        latency_ms=int((time.time() - start_time) * 1000),
+                    )
+
+                # ================================================================
+                # Step 3: Format context and construct prompt
+                # ================================================================
+                logger.debug("prompt_construction_started")
+                with tracer.start_as_current_span("rag.build_prompt") as prompt_span:
+                    system_prompt = self._construct_system_prompt()
+                    user_message = self._construct_user_message(
+                        question=request.question,
+                        search_results=search_results,
+                    )
+                    _set_span_attr(prompt_span, "prompt.system.length", len(system_prompt))
+                    _set_span_attr(prompt_span, "prompt.user.length", len(user_message))
+                logger.debug(
+                    "prompt_construction_completed",
+                    system_prompt_length=len(system_prompt),
+                    user_message_length=len(user_message),
+                )
+
+                # ================================================================
+                # Step 4: Call the chat model
+                # ================================================================
+                logger.debug("llm_inference_started", model=self.chat_model)
+                try:
+                    answer = await self._call_llm(system_prompt, user_message)
+                    logger.info("llm_inference_completed", answer_length=len(answer))
+                    _set_span_attr(span, "rag.answer.mode", "llm")
+                except LLMServiceException as llm_error:
+                    logger.warning(
+                        "llm_inference_fallback_to_context_summary error=%s",
+                        str(llm_error)[:500],
+                    )
+                    answer = self._build_fallback_answer(search_results)
+                    _set_span_attr(span, "rag.answer.mode", "fallback")
+                    _set_span_attr(span, "rag.llm_error", str(llm_error)[:500])
+
+                # ================================================================
+                # Step 5: Map citations
+                # ================================================================
+                logger.debug("citation_synthesis_started")
+                with tracer.start_as_current_span("rag.build_citations") as citation_span:
+                    citations = self._build_citations(
+                        search_results,
+                        max_citations=request.max_citations,
+                    )
+                    _set_span_attr(citation_span, "rag.citations.count", len(citations))
+                logger.debug("citation_synthesis_completed", citations_count=len(citations))
+
+                # ================================================================
+                # Step 6: Return response
+                # ================================================================
+                latency_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    "rag_pipeline_completed",
+                    citations_returned=len(citations),
+                    latency_ms=latency_ms,
+                )
+                _set_span_attr(span, "rag.latency_ms", latency_ms)
+                _set_span_attr(span, "rag.citations.count", len(citations))
+                _set_span_attr(span, "rag.model", self.chat_model)
+
                 return QueryResponse(
                     question=request.question,
                     answer=answer,
-                    citations=[],
+                    citations=citations,
                     model_used=self.chat_model,
-                    latency_ms=int((time.time() - start_time) * 1000),
+                    latency_ms=latency_ms,
                 )
 
-            # ================================================================
-            # Step 3: Format context and construct prompt
-            # ================================================================
-            logger.debug("prompt_construction_started")
-            system_prompt = self._construct_system_prompt()
-            user_message = self._construct_user_message(
-                question=request.question,
-                search_results=search_results,
-            )
-            logger.debug(
-                "prompt_construction_completed",
-                system_prompt_length=len(system_prompt),
-                user_message_length=len(user_message),
-            )
-
-            # ================================================================
-            # Step 4: Call the chat model
-            # ================================================================
-            logger.debug("llm_inference_started", model=self.chat_model)
-            try:
-                answer = await self._call_llm(system_prompt, user_message)
-                logger.info("llm_inference_completed", answer_length=len(answer))
-            except LLMServiceException as llm_error:
-                logger.warning(
-                    "llm_inference_fallback_to_context_summary error=%s",
-                    str(llm_error)[:500],
-                )
-                answer = self._build_fallback_answer(search_results)
-
-            # ================================================================
-            # Step 5: Map citations
-            # ================================================================
-            logger.debug("citation_synthesis_started")
-            citations = self._build_citations(
-                search_results,
-                max_citations=request.max_citations,
-            )
-            logger.debug("citation_synthesis_completed", citations_count=len(citations))
-
-            # ================================================================
-            # Step 6: Return response
-            # ================================================================
-            latency_ms = int((time.time() - start_time) * 1000)
-            logger.info(
-                "rag_pipeline_completed",
-                citations_returned=len(citations),
-                latency_ms=latency_ms,
-            )
-
-            return QueryResponse(
-                question=request.question,
-                answer=answer,
-                citations=citations,
-                model_used=self.chat_model,
-                latency_ms=latency_ms,
-            )
-
-        except LLMRateLimitException:
-            logger.warning("llm_rate_limit_exceeded")
-            raise
-        except LLMContextLengthException:
-            logger.warning("llm_context_length_exceeded")
-            raise
-        except LLMServiceException:
-            logger.error("llm_service_error", exc_info=True)
-            raise
-        except Exception as e:
-            logger.error(f"rag_pipeline_unexpected_error: {type(e).__name__}", exc_info=True)
-            raise LLMServiceException(
-                message=f"RAG pipeline failed: {type(e).__name__}",
-                detail="An unexpected error occurred during question answering.",
-            ) from e
+            except LLMRateLimitException:
+                logger.warning("llm_rate_limit_exceeded")
+                _set_span_attr(span, "error.type", "LLMRateLimitException")
+                raise
+            except LLMContextLengthException:
+                logger.warning("llm_context_length_exceeded")
+                _set_span_attr(span, "error.type", "LLMContextLengthException")
+                raise
+            except LLMServiceException:
+                logger.error("llm_service_error", exc_info=True)
+                _set_span_attr(span, "error.type", "LLMServiceException")
+                raise
+            except Exception as e:
+                logger.error(f"rag_pipeline_unexpected_error: {type(e).__name__}", exc_info=True)
+                _set_span_attr(span, "error.type", type(e).__name__)
+                raise LLMServiceException(
+                    message=f"RAG pipeline failed: {type(e).__name__}",
+                    detail="An unexpected error occurred during question answering.",
+                ) from e
 
     # ================================================================
     # Private helper methods
@@ -512,30 +567,37 @@ If insufficient information is available, state that clearly.\
             LLMServiceException: On other API errors
         """
         try:
-            request_kwargs: dict[str, Any] = {
-                "model": self.chat_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-            }
+            with tracer.start_as_current_span("rag.call_llm") as span:
+                _set_span_attr(span, "llm.model", self.chat_model)
+                _set_span_attr(span, "llm.system_prompt.length", len(system_prompt))
+                _set_span_attr(span, "llm.user_message.length", len(user_message))
 
-            # GPT-5 serverless deployments only accept default sampling values.
-            # Keep deterministic overrides for prior chat models.
-            if not self.chat_model.lower().startswith("gpt-5"):
-                request_kwargs["temperature"] = 0.2
-                request_kwargs["top_p"] = 0.95
+                request_kwargs: dict[str, Any] = {
+                    "model": self.chat_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                }
 
-            response = await self.openai_client.chat.completions.create(**request_kwargs)
+                # GPT-5 serverless deployments only accept default sampling values.
+                # Keep deterministic overrides for prior chat models.
+                if not self.chat_model.lower().startswith("gpt-5"):
+                    request_kwargs["temperature"] = 0.2
+                    request_kwargs["top_p"] = 0.95
 
-            answer = response.choices[0].message.content
-            logger.debug(
-                "llm_response_received",
-                answer_length=len(answer) if answer else 0,
-                finish_reason=response.choices[0].finish_reason,
-            )
+                response = await self.openai_client.chat.completions.create(**request_kwargs)
 
-            return answer or ""
+                answer = response.choices[0].message.content
+                logger.debug(
+                    "llm_response_received",
+                    answer_length=len(answer) if answer else 0,
+                    finish_reason=response.choices[0].finish_reason,
+                )
+                _set_span_attr(span, "llm.answer.length", len(answer) if answer else 0)
+                _set_span_attr(span, "llm.finish_reason", response.choices[0].finish_reason)
+
+                return answer or ""
 
         except RateLimitError as e:
             logger.warning(f"llm_rate_limit: {e}")

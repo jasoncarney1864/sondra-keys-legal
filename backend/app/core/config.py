@@ -212,6 +212,27 @@ class LoggingSettings(BaseSettings):
         case_sensitive = False
 
 
+class TracingSettings(BaseSettings):
+    """Tracing configuration for OpenTelemetry and model instrumentation."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable tracing setup at application startup"
+    )
+    instrument_openai: bool = Field(
+        default=True,
+        description="Enable OpenAI SDK tracing instrumentation"
+    )
+    capture_message_content: bool = Field(
+        default=False,
+        description="Capture prompt/completion content in telemetry logs"
+    )
+
+    class Config:
+        env_prefix = "TRACING_"
+        case_sensitive = False
+
+
 class HUDSettings(BaseSettings):
     """HUD source ingestion and discovery configuration."""
 
@@ -345,6 +366,7 @@ class Settings(BaseSettings):
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    tracing: TracingSettings = Field(default_factory=TracingSettings)
     hud: HUDSettings = Field(default_factory=HUDSettings)
 
     @field_validator("environment")

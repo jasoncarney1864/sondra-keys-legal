@@ -350,6 +350,18 @@ Runtime behavior:
 - Backend auto-enables Azure Monitor when `APPLICATIONINSIGHTS_CONNECTION_STRING` is present.
 - Startup logs `monitoring_configured_azure_monitor` on success.
 - Monitoring init failures are non-fatal and logged as `monitoring_configuration_failed`.
+- Ask pipeline emits step-level OpenTelemetry spans (`rag.answer_query`, `rag.embed_question`, `rag.retrieve_context`, `rag.call_llm`, `rag.build_citations`) for latency and outcome analysis.
+- OpenAI SDK tracing auto-instruments at startup when `TRACING_ENABLED=true` and `TRACING_INSTRUMENT_OPENAI=true`.
+- Query route adds hashed correlation attributes on request spans for filtering without exposing raw IDs:
+  - `sondra.user.hash`
+  - `sondra.session.hash`
+  - `sondra.active_document.hash`
+  - `sondra.scoped_document.hashes`
+
+Tracing toggles:
+- `TRACING_ENABLED` (default `true`): enables tracing bootstrap.
+- `TRACING_INSTRUMENT_OPENAI` (default `true`): enables OpenAI SDK instrumentation.
+- `TRACING_CAPTURE_MESSAGE_CONTENT` (default `false`): includes prompt/completion content in telemetry logs.
 
 ## Troubleshooting
 

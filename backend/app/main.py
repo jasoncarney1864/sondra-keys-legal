@@ -47,6 +47,7 @@ from backend.app.core.exceptions import (
 )
 from backend.app.models.db import DocumentRecordORM, ProcessingStatus, UserSessionORM
 from backend.app.services.document_processor import DocumentProcessor
+from backend.app.core.tracing import configure_openai_instrumentation
 
 # Configure structured logging
 structlog.configure(
@@ -82,19 +83,20 @@ def configure_monitoring() -> None:
     connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
     if not connection_string:
         logger.info("monitoring_not_configured_app_insights_connection_string_missing")
-        return
+    else:
+        try:
+            from azure.monitor.opentelemetry import configure_azure_monitor
 
-    try:
-        from azure.monitor.opentelemetry import configure_azure_monitor
+            configure_azure_monitor(connection_string=connection_string)
+            logger.info("monitoring_configured_azure_monitor")
+        except Exception as e:
+            # Monitoring failures should never block API startup.
+            logger.warning(
+                "monitoring_configuration_failed",
+                error=f"{type(e).__name__}: {e}",
+            )
 
-        configure_azure_monitor(connection_string=connection_string)
-        logger.info("monitoring_configured_azure_monitor")
-    except Exception as e:
-        # Monitoring failures should never block API startup.
-        logger.warning(
-            "monitoring_configuration_failed",
-            error=f"{type(e).__name__}: {e}",
-        )
+    configure_openai_instrumentation()
 
 
 configure_monitoring()

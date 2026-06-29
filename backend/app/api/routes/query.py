@@ -3,8 +3,10 @@ Q&A query route: POST /api/query
 """
 
 import logging
+from hashlib import sha256
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from opentelemetry import trace
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +24,46 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+def _hash_identifier(raw_value: str | None) -> str | None:
+    """Return a short stable hash for correlation without exposing raw identifiers."""
+    if not raw_value:
+        return None
+    return sha256(raw_value.encode("utf-8")).hexdigest()[:16]
+
+
+def _set_trace_correlation_attributes(
+    *,
+    user_id: str,
+    session_id: str,
+    active_document_id: str | None,
+    scoped_document_ids: list,
+    selection_source: str,
+) -> None:
+    """Attach hashed correlation attributes to the current FastAPI request span."""
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+
+    user_hash = _hash_identifier(user_id)
+    session_hash = _hash_identifier(session_id)
+    active_document_hash = _hash_identifier(active_document_id)
+    scoped_document_hashes = [
+        hashed for hashed in (_hash_identifier(str(doc_id)) for doc_id in scoped_document_ids) if hashed
+    ]
+
+    if user_hash:
+        span.set_attribute("sondra.user.hash", user_hash)
+    if session_hash:
+        span.set_attribute("sondra.session.hash", session_hash)
+    if active_document_hash:
+        span.set_attribute("sondra.active_document.hash", active_document_hash)
+
+    span.set_attribute("sondra.selection_source", selection_source)
+    span.set_attribute("sondra.scoped_document.count", len(scoped_document_ids))
+    if scoped_document_hashes:
+        span.set_attribute("sondra.scoped_document.hashes", scoped_document_hashes)
 
 
 @router.post(
@@ -104,6 +146,18 @@ async def query_documents(
         ),
         selection_source=selection_source,
         scoped_document_ids=[str(d) for d in scoped_document_ids],
+    )
+
+    _set_trace_correlation_attributes(
+        user_id=current_user_id,
+        session_id=str(current_session.id),
+        active_document_id=(
+            str(current_session.active_document_id)
+            if current_session.active_document_id
+            else None
+        ),
+        scoped_document_ids=scoped_document_ids,
+        selection_source=selection_source,
     )
 
     response = await query_service.answer_query(scoped_request)
