@@ -4,6 +4,9 @@ param location string
 @description('Environment name')
 param environment string
 
+@description('Tags applied to resources')
+param tags object = {}
+
 @description('Log Analytics workspace resource ID')
 param logAnalyticsWorkspaceId string
 
@@ -13,6 +16,7 @@ var environmentName = 'cae-sondra-legal-${environment}'
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {
   name: environmentName
   location: location
+  tags: tags
   properties: {
     appLogsConfiguration: {
       destination: 'log-analytics'

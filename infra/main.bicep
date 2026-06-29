@@ -68,6 +68,18 @@ param openAIApiKey string
 @secure()
 param securityApiKey string
 
+@description('Creator tag value applied to all managed resources')
+param creatorTag string = 'Jason'
+
+@description('Date created tag value applied to all managed resources (yyyy-MM-dd)')
+param dateCreatedTag string = utcNow('yyyy-MM-dd')
+
+@description('Owner tag value applied to all managed resources')
+param ownerTag string = 'Jason'
+
+@description('Project tag value applied to all managed resources')
+param projectTag string = 'sondra-keys-legal'
+
 @description('Number of backend 5xx requests in alert window that triggers alert')
 param backend5xxThreshold int = 15
 
@@ -89,15 +101,60 @@ param additionalAlertActionGroupResourceIds array = []
 var storageAccountKey = first(split(last(split(storageConnectionString, 'AccountKey=')), ';'))
 var appEnvironment = environment == 'prod' ? 'production' : (environment == 'staging' ? 'staging' : 'development')
 var databasePasswordEncoded = uriComponent(databaseAdminPassword)
+var commonTags = {
+  Environment: environment
+  Project: projectTag
+  Owner: ownerTag
+  Creator: creatorTag
+  DateCreated: dateCreatedTag
+  ManagedBy: 'bicep'
+}
 
 // Resource group
 resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: resourceGroupName
   location: location
-  tags: {
-    environment: environment
-    project: 'sondra-keys-legal'
-    managedBy: 'bicep'
+  tags: commonTags
+}
+
+// Tag governance policy definition (indexed mode targets taggable resources)
+resource requireTagPolicyDefinition 'Microsoft.Authorization/policyDefinitions@2023-04-01' = {
+  name: 'pd-sondra-require-tag-on-resources'
+  properties: {
+    displayName: 'Require tag on resources (Sondra)'
+    description: 'Requires configured tags on all taggable resources in Sondra scopes.'
+    policyType: 'Custom'
+    mode: 'Indexed'
+    metadata: {
+      category: 'Tags'
+      version: '1.0.0'
+    }
+    parameters: {
+      tagName: {
+        type: 'String'
+        metadata: {
+          displayName: 'Tag Name'
+          description: 'Tag name that must exist on resource creation.'
+        }
+      }
+    }
+    policyRule: {
+      if: {
+        value: '''[contains(field('tags'), parameters('tagName'))]'''
+        equals: 'false'
+      }
+      then: {
+        effect: 'deny'
+      }
+    }
+  }
+}
+
+module tagPolicyAssignments 'modules/tag-policy-assignments.bicep' = {
+  scope: rg
+  name: 'tag-policy-assignments-deployment'
+  params: {
+    policyDefinitionId: requireTagPolicyDefinition.id
   }
 }
 
@@ -108,6 +165,7 @@ module monitoring 'modules/monitoring.bicep' = {
   params: {
     location: location
     environment: environment
+    tags: commonTags
     enableAlerts: deployApps
     backend5xxThreshold: backend5xxThreshold
     backendExceptionThreshold: backendExceptionThreshold
@@ -125,6 +183,7 @@ module containerRegistry 'modules/container-registry.bicep' = {
   params: {
     location: location
     environment: environment
+    tags: commonTags
   }
 }
 
@@ -135,6 +194,7 @@ module database 'modules/postgresql.bicep' = {
   params: {
     location: location
     environment: environment
+    tags: commonTags
     administratorLogin: databaseAdminUsername
     administratorPassword: databaseAdminPassword
   }
@@ -147,6 +207,7 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
   params: {
     location: location
     environment: environment
+    tags: commonTags
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
   }
 }
@@ -158,6 +219,7 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
   params: {
     location: location
     environment: environment
+    tags: commonTags
     appName: 'backend'
     containerAppsEnvironmentId: containerAppsEnv.outputs.environmentId
     containerRegistryName: containerRegistry.outputs.registryName
@@ -295,6 +357,7 @@ module frontendApp 'modules/container-app.bicep' = if (deployApps) {
   params: {
     location: location
     environment: environment
+    tags: commonTags
     appName: 'frontend'
     containerAppsEnvironmentId: containerAppsEnv.outputs.environmentId
     containerRegistryName: containerRegistry.outputs.registryName

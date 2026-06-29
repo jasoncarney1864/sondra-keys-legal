@@ -4,6 +4,9 @@ param location string
 @description('Environment name')
 param environment string
 
+@description('Tags applied to resources')
+param tags object = {}
+
 @description('Enable baseline alert rules for backend health and latency')
 param enableAlerts bool = true
 
@@ -43,6 +46,7 @@ var appEmailReceivers = [for (email, index) in appOnCallEmailAddresses: {
 resource sreActionGroup 'Microsoft.Insights/actionGroups@2022-06-01' = if (length(sreEmailReceivers) > 0) {
   name: sreActionGroupName
   location: 'global'
+  tags: tags
   properties: {
     groupShortName: 'sre${environment}'
     enabled: true
@@ -53,6 +57,7 @@ resource sreActionGroup 'Microsoft.Insights/actionGroups@2022-06-01' = if (lengt
 resource appActionGroup 'Microsoft.Insights/actionGroups@2022-06-01' = if (length(appEmailReceivers) > 0) {
   name: appActionGroupName
   location: 'global'
+  tags: tags
   properties: {
     groupShortName: 'app${environment}'
     enabled: true
@@ -70,6 +75,7 @@ var defaultAlertActionGroupResourceIds = concat(
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
   location: location
+  tags: tags
   properties: {
     sku: {
       name: 'PerGB2018'
@@ -82,6 +88,7 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   name: appInsightsName
   location: location
+  tags: tags
   kind: 'web'
   properties: {
     Application_Type: 'web'
@@ -93,6 +100,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 resource backend5xxSpikeAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = if (enableAlerts) {
   name: 'alert-sondra-legal-backend-5xx-spike-${environment}'
   location: location
+  tags: tags
   kind: 'LogAlert'
   properties: {
     description: 'Backend API 5xx spike detected in AppRequests telemetry.'
@@ -142,6 +150,7 @@ union isfuzzy=true AppRequests, requests
 resource backendExceptionSpikeAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = if (enableAlerts) {
   name: 'alert-sondra-legal-backend-exception-spike-${environment}'
   location: location
+  tags: tags
   kind: 'LogAlert'
   properties: {
     description: 'Backend exception spike detected in AppExceptions telemetry.'
@@ -190,6 +199,7 @@ union isfuzzy=true AppExceptions, exceptions
 resource backendP95LatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = if (enableAlerts) {
   name: 'alert-sondra-legal-backend-p95-latency-${environment}'
   location: location
+  tags: tags
   kind: 'LogAlert'
   properties: {
     description: 'Backend API p95 latency is above threshold.'

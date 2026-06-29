@@ -4,6 +4,9 @@ param location string
 @description('Environment name')
 param environment string
 
+@description('Tags applied to resources')
+param tags object = {}
+
 @description('Application name (backend or frontend)')
 param appName string
 
@@ -42,6 +45,7 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' e
 resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: containerAppName
   location: location
+  tags: tags
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
     configuration: {

@@ -4,6 +4,9 @@ param location string
 @description('Environment name')
 param environment string
 
+@description('Tags applied to resources')
+param tags object = {}
+
 @description('Database administrator username')
 @secure()
 param administratorLogin string
@@ -19,6 +22,7 @@ var databaseName = 'sondra_legal'
 resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2023-03-01-preview' = {
   name: postgresName
   location: location
+  tags: tags
   sku: {
     name: 'Standard_B1ms'
     tier: 'Burstable'

@@ -56,6 +56,10 @@ jobs:
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
+      TAG_CREATOR: ${{ vars.TAG_CREATOR }}
+      TAG_DATE_CREATED: ${{ vars.TAG_DATE_CREATED }}
+      TAG_OWNER: ${{ vars.TAG_OWNER }}
+      TAG_PROJECT: ${{ vars.TAG_PROJECT }}
       ALERT_SRE_ONCALL_EMAILS: ${{ vars.ALERT_SRE_ONCALL_EMAILS }}
       ALERT_APP_ONCALL_EMAILS: ${{ vars.ALERT_APP_ONCALL_EMAILS }}
       ALERT_ADDITIONAL_ACTION_GROUP_IDS: ${{ vars.ALERT_ADDITIONAL_ACTION_GROUP_IDS }}
@@ -141,6 +145,22 @@ jobs:
             "securityApiKey=${SECURITY_API_KEY}"
           )
 
+          if [ -n "${TAG_CREATOR:-}" ]; then
+            params+=("creatorTag=${TAG_CREATOR}")
+          fi
+
+          if [ -n "${TAG_DATE_CREATED:-}" ]; then
+            params+=("dateCreatedTag=${TAG_DATE_CREATED}")
+          fi
+
+          if [ -n "${TAG_OWNER:-}" ]; then
+            params+=("ownerTag=${TAG_OWNER}")
+          fi
+
+          if [ -n "${TAG_PROJECT:-}" ]; then
+            params+=("projectTag=${TAG_PROJECT}")
+          fi
+
           if [ -n "${ALERT_SRE_ONCALL_EMAILS:-}" ]; then
             sre_oncall_json="$(echo "${ALERT_SRE_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
             params+=("sreOnCallEmailAddresses=${sre_oncall_json}")
@@ -184,6 +204,10 @@ jobs:
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
+      TAG_CREATOR: ${{ vars.TAG_CREATOR }}
+      TAG_DATE_CREATED: ${{ vars.TAG_DATE_CREATED }}
+      TAG_OWNER: ${{ vars.TAG_OWNER }}
+      TAG_PROJECT: ${{ vars.TAG_PROJECT }}
       ALERT_SRE_ONCALL_EMAILS: ${{ vars.ALERT_SRE_ONCALL_EMAILS }}
       ALERT_APP_ONCALL_EMAILS: ${{ vars.ALERT_APP_ONCALL_EMAILS }}
       ALERT_ADDITIONAL_ACTION_GROUP_IDS: ${{ vars.ALERT_ADDITIONAL_ACTION_GROUP_IDS }}
@@ -236,6 +260,22 @@ jobs:
             "openAIApiKey=${OPENAI_API_KEY}"
             "securityApiKey=${SECURITY_API_KEY}"
           )
+
+          if [ -n "${TAG_CREATOR:-}" ]; then
+            params+=("creatorTag=${TAG_CREATOR}")
+          fi
+
+          if [ -n "${TAG_DATE_CREATED:-}" ]; then
+            params+=("dateCreatedTag=${TAG_DATE_CREATED}")
+          fi
+
+          if [ -n "${TAG_OWNER:-}" ]; then
+            params+=("ownerTag=${TAG_OWNER}")
+          fi
+
+          if [ -n "${TAG_PROJECT:-}" ]; then
+            params+=("projectTag=${TAG_PROJECT}")
+          fi
 
           if [ -n "${ALERT_SRE_ONCALL_EMAILS:-}" ]; then
             sre_oncall_json="$(echo "${ALERT_SRE_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
@@ -331,6 +371,10 @@ jobs:
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
+      TAG_CREATOR: ${{ vars.TAG_CREATOR }}
+      TAG_DATE_CREATED: ${{ vars.TAG_DATE_CREATED }}
+      TAG_OWNER: ${{ vars.TAG_OWNER }}
+      TAG_PROJECT: ${{ vars.TAG_PROJECT }}
       ALERT_SRE_ONCALL_EMAILS: ${{ vars.ALERT_SRE_ONCALL_EMAILS }}
       ALERT_APP_ONCALL_EMAILS: ${{ vars.ALERT_APP_ONCALL_EMAILS }}
       ALERT_ADDITIONAL_ACTION_GROUP_IDS: ${{ vars.ALERT_ADDITIONAL_ACTION_GROUP_IDS }}
@@ -383,6 +427,22 @@ jobs:
             "openAIApiKey=${OPENAI_API_KEY}"
             "securityApiKey=${SECURITY_API_KEY}"
           )
+
+          if [ -n "${TAG_CREATOR:-}" ]; then
+            params+=("creatorTag=${TAG_CREATOR}")
+          fi
+
+          if [ -n "${TAG_DATE_CREATED:-}" ]; then
+            params+=("dateCreatedTag=${TAG_DATE_CREATED}")
+          fi
+
+          if [ -n "${TAG_OWNER:-}" ]; then
+            params+=("ownerTag=${TAG_OWNER}")
+          fi
+
+          if [ -n "${TAG_PROJECT:-}" ]; then
+            params+=("projectTag=${TAG_PROJECT}")
+          fi
 
           if [ -n "${ALERT_SRE_ONCALL_EMAILS:-}" ]; then
             sre_oncall_json="$(echo "${ALERT_SRE_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
