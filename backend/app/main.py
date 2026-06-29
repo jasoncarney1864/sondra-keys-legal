@@ -111,7 +111,7 @@ async def validate_azure_openai_deployments() -> None:
         await client.chat.completions.create(
             model=chat_deployment,
             messages=[{"role": "user", "content": "test"}],
-            max_completion_tokens=5,
+            max_tokens=5,
         )
         logger.info(
             "azure_openai_chat_deployment_validated",
