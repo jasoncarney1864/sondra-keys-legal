@@ -420,6 +420,24 @@ h3 {
   color: #4f5b56;
 }
 
+.ask-prompt-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ask-prompt-actions .muted {
+  font-size: 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .ask-prompt-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 .pdf-upload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

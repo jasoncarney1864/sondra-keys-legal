@@ -171,6 +171,13 @@ export function AskPage({ sessionId }: AskPageProps) {
             placeholder="What are the parking restrictions in Skyline?"
           />
 
+          <div className="ask-prompt-actions">
+            <p className="muted">Tip: press Shift+Enter to submit quickly.</p>
+            <button type="submit" className="primary" disabled={!canSubmit || queryMutation.isPending}>
+              {queryMutation.isPending ? 'Running query...' : 'Ask'}
+            </button>
+          </div>
+
           <div>
             <div className="card-title-row">
               <label className="label">Explicit document scope</label>
@@ -279,10 +286,6 @@ export function AskPage({ sessionId }: AskPageProps) {
               </p>
             ) : null}
           </div>
-
-          <button type="submit" className="primary" disabled={!canSubmit || queryMutation.isPending}>
-            {queryMutation.isPending ? 'Running query...' : 'Ask question'}
-          </button>
         </form>
 
         {queryMutation.isError ? (
