@@ -63,9 +63,11 @@ resource backend5xxSpikeAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01
         {
           query: '''
 union isfuzzy=true AppRequests, requests
-| where TimeGenerated > ago(15m)
+| extend RequestTime = todatetime(coalesce(column_ifexists("TimeGenerated", datetime(null)), column_ifexists("timestamp", datetime(null))))
 | extend RequestUrl = tostring(coalesce(column_ifexists("Url", ""), column_ifexists("url", "")))
 | extend RequestResultCode = tostring(coalesce(column_ifexists("ResultCode", ""), column_ifexists("resultCode", "")))
+| where isnotnull(RequestTime)
+| where RequestTime > ago(15m)
 | where RequestUrl has "/api/"
 | where RequestResultCode startswith "5"
 '''
@@ -110,9 +112,12 @@ resource backendExceptionSpikeAlert 'Microsoft.Insights/scheduledQueryRules@2023
         {
           query: '''
 union isfuzzy=true AppExceptions, exceptions
-| where TimeGenerated > ago(15m)
+| extend ExceptionTime = todatetime(coalesce(column_ifexists("TimeGenerated", datetime(null)), column_ifexists("timestamp", datetime(null))))
 | extend RoleName = tostring(coalesce(column_ifexists("AppRoleName", ""), column_ifexists("cloud_RoleName", "")))
-| where RoleName has "backend" or tostring(Properties) has "/api/"
+| extend ExceptionProps = tostring(coalesce(column_ifexists("Properties", dynamic(null)), column_ifexists("customDimensions", dynamic(null))))
+| where isnotnull(ExceptionTime)
+| where ExceptionTime > ago(15m)
+| where RoleName has "backend" or ExceptionProps has "/api/"
 '''
           timeAggregation: 'Count'
           operator: 'GreaterThanOrEqual'
@@ -155,9 +160,11 @@ resource backendP95LatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-
         {
           query: '''
 union isfuzzy=true AppRequests, requests
-| where TimeGenerated > ago(15m)
+| extend RequestTime = todatetime(coalesce(column_ifexists("TimeGenerated", datetime(null)), column_ifexists("timestamp", datetime(null))))
 | extend RequestUrl = tostring(coalesce(column_ifexists("Url", ""), column_ifexists("url", "")))
 | extend RequestDurationMs = todouble(coalesce(column_ifexists("DurationMs", real(null)), column_ifexists("duration", real(null))))
+| where isnotnull(RequestTime)
+| where RequestTime > ago(15m)
 | where RequestUrl has "/api/"
 | where isnotnull(RequestDurationMs)
 | summarize p95LatencyMs = percentile(RequestDurationMs, 95)
