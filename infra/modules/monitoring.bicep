@@ -62,10 +62,12 @@ resource backend5xxSpikeAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01
       allOf: [
         {
           query: '''
-AppRequests
+union isfuzzy=true AppRequests, requests
 | where TimeGenerated > ago(15m)
-| where Url has "/api/"
-| where ResultCode startswith "5"
+| extend RequestUrl = tostring(coalesce(column_ifexists("Url", ""), column_ifexists("url", "")))
+| extend RequestResultCode = tostring(coalesce(column_ifexists("ResultCode", ""), column_ifexists("resultCode", "")))
+| where RequestUrl has "/api/"
+| where RequestResultCode startswith "5"
 '''
           timeAggregation: 'Count'
           operator: 'GreaterThanOrEqual'
@@ -107,9 +109,10 @@ resource backendExceptionSpikeAlert 'Microsoft.Insights/scheduledQueryRules@2023
       allOf: [
         {
           query: '''
-AppExceptions
+union isfuzzy=true AppExceptions, exceptions
 | where TimeGenerated > ago(15m)
-| where AppRoleName has "backend" or tostring(Properties) has "/api/"
+| extend RoleName = tostring(coalesce(column_ifexists("AppRoleName", ""), column_ifexists("cloud_RoleName", "")))
+| where RoleName has "backend" or tostring(Properties) has "/api/"
 '''
           timeAggregation: 'Count'
           operator: 'GreaterThanOrEqual'
@@ -151,10 +154,13 @@ resource backendP95LatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-
       allOf: [
         {
           query: '''
-AppRequests
+union isfuzzy=true AppRequests, requests
 | where TimeGenerated > ago(15m)
-| where Url has "/api/"
-| summarize p95LatencyMs = percentile(DurationMs, 95)
+| extend RequestUrl = tostring(coalesce(column_ifexists("Url", ""), column_ifexists("url", "")))
+| extend RequestDurationMs = todouble(coalesce(column_ifexists("DurationMs", real(null)), column_ifexists("duration", real(null))))
+| where RequestUrl has "/api/"
+| where isnotnull(RequestDurationMs)
+| summarize p95LatencyMs = percentile(RequestDurationMs, 95)
 '''
           metricMeasureColumn: 'p95LatencyMs'
           timeAggregation: 'Maximum'

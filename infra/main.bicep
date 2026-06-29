@@ -90,6 +90,7 @@ module monitoring 'modules/monitoring.bicep' = {
   params: {
     location: location
     environment: environment
+    enableAlerts: deployApps
   }
 }
 
