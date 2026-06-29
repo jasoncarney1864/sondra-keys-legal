@@ -69,6 +69,7 @@ param openAIApiKey string
 param securityApiKey string
 
 var storageAccountKey = first(split(last(split(storageConnectionString, 'AccountKey=')), ';'))
+var appEnvironment = environment == 'prod' ? 'production' : (environment == 'staging' ? 'staging' : 'development')
 
 // Resource group
 resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
@@ -221,7 +222,7 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
       }
       {
         name: 'ENVIRONMENT'
-        value: environment
+        value: appEnvironment
       }
       {
         name: 'SECURITY_API_KEY'
