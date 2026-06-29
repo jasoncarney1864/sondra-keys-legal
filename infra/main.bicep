@@ -68,6 +68,24 @@ param openAIApiKey string
 @secure()
 param securityApiKey string
 
+@description('Number of backend 5xx requests in alert window that triggers alert')
+param backend5xxThreshold int = 15
+
+@description('Number of backend exceptions in alert window that triggers alert')
+param backendExceptionThreshold int = 20
+
+@description('P95 backend latency threshold in milliseconds for alerting')
+param backendP95LatencyMsThreshold int = 3000
+
+@description('Email addresses for SRE on-call monitoring action group')
+param sreOnCallEmailAddresses array = []
+
+@description('Email addresses for application team on-call monitoring action group')
+param appOnCallEmailAddresses array = []
+
+@description('Optional existing action group resource IDs to include in monitoring alerts')
+param additionalAlertActionGroupResourceIds array = []
+
 var storageAccountKey = first(split(last(split(storageConnectionString, 'AccountKey=')), ';'))
 var appEnvironment = environment == 'prod' ? 'production' : (environment == 'staging' ? 'staging' : 'development')
 var databasePasswordEncoded = uriComponent(databaseAdminPassword)
@@ -91,6 +109,12 @@ module monitoring 'modules/monitoring.bicep' = {
     location: location
     environment: environment
     enableAlerts: deployApps
+    backend5xxThreshold: backend5xxThreshold
+    backendExceptionThreshold: backendExceptionThreshold
+    backendP95LatencyMsThreshold: backendP95LatencyMsThreshold
+    sreOnCallEmailAddresses: sreOnCallEmailAddresses
+    appOnCallEmailAddresses: appOnCallEmailAddresses
+    additionalAlertActionGroupResourceIds: additionalAlertActionGroupResourceIds
   }
 }
 

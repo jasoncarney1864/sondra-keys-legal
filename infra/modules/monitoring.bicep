@@ -16,8 +16,55 @@ param backendExceptionThreshold int = 20
 @description('P95 backend request latency threshold in milliseconds')
 param backendP95LatencyMsThreshold int = 3000
 
+@description('Email addresses for SRE on-call notifications (comma-separated in workflow vars, passed as array)')
+param sreOnCallEmailAddresses array = []
+
+@description('Email addresses for application team on-call notifications (comma-separated in workflow vars, passed as array)')
+param appOnCallEmailAddresses array = []
+
+@description('Optional existing action group resource IDs to include in all monitoring alerts')
+param additionalAlertActionGroupResourceIds array = []
+
 var logAnalyticsName = 'log-sondra-legal-${environment}'
 var appInsightsName = 'appi-sondra-legal-${environment}'
+var sreActionGroupName = 'ag-sondra-legal-sre-${environment}'
+var appActionGroupName = 'ag-sondra-legal-app-${environment}'
+var sreEmailReceivers = [for (email, index) in sreOnCallEmailAddresses: {
+  name: 'sre-oncall-${index}'
+  emailAddress: email
+  useCommonAlertSchema: true
+}]
+var appEmailReceivers = [for (email, index) in appOnCallEmailAddresses: {
+  name: 'app-oncall-${index}'
+  emailAddress: email
+  useCommonAlertSchema: true
+}]
+
+resource sreActionGroup 'Microsoft.Insights/actionGroups@2022-06-01' = if (length(sreEmailReceivers) > 0) {
+  name: sreActionGroupName
+  location: 'global'
+  properties: {
+    groupShortName: 'sre${environment}'
+    enabled: true
+    emailReceivers: sreEmailReceivers
+  }
+}
+
+resource appActionGroup 'Microsoft.Insights/actionGroups@2022-06-01' = if (length(appEmailReceivers) > 0) {
+  name: appActionGroupName
+  location: 'global'
+  properties: {
+    groupShortName: 'app${environment}'
+    enabled: true
+    emailReceivers: appEmailReceivers
+  }
+}
+
+var defaultAlertActionGroupResourceIds = concat(
+  length(sreEmailReceivers) > 0 ? [sreActionGroup.id] : [],
+  length(appEmailReceivers) > 0 ? [appActionGroup.id] : [],
+  additionalAlertActionGroupResourceIds
+)
 
 // Log Analytics Workspace
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -82,7 +129,7 @@ union isfuzzy=true AppRequests, requests
       ]
     }
     actions: {
-      actionGroups: []
+      actionGroups: defaultAlertActionGroupResourceIds
       customProperties: {
         alertType: 'backend-5xx-spike'
         environment: environment
@@ -130,7 +177,7 @@ union isfuzzy=true AppExceptions, exceptions
       ]
     }
     actions: {
-      actionGroups: []
+      actionGroups: defaultAlertActionGroupResourceIds
       customProperties: {
         alertType: 'backend-exception-spike'
         environment: environment
@@ -181,7 +228,7 @@ union isfuzzy=true AppRequests, requests
       ]
     }
     actions: {
-      actionGroups: []
+      actionGroups: defaultAlertActionGroupResourceIds
       customProperties: {
         alertType: 'backend-p95-latency'
         environment: environment

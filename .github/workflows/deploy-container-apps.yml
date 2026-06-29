@@ -56,6 +56,9 @@ jobs:
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
+      ALERT_SRE_ONCALL_EMAILS: ${{ vars.ALERT_SRE_ONCALL_EMAILS }}
+      ALERT_APP_ONCALL_EMAILS: ${{ vars.ALERT_APP_ONCALL_EMAILS }}
+      ALERT_ADDITIONAL_ACTION_GROUP_IDS: ${{ vars.ALERT_ADDITIONAL_ACTION_GROUP_IDS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,8 +112,14 @@ jobs:
           search_index_name="${SEARCH_INDEX_NAME:-documents}"
           storage_container_name="${STORAGE_CONTAINER_NAME:-documents}"
           openai_api_version="${OPENAI_API_VERSION:-2024-10-21}"
+          param_file="infra/main.${DEPLOY_ENV}.parameters.json"
 
-          params=(
+          params=()
+          if [ -f "${param_file}" ]; then
+            params+=("@${param_file}")
+          fi
+
+          params+=(
             "environment=${DEPLOY_ENV}"
             "location=${AZURE_LOCATION}"
             "resourceGroupName=${resource_group_name}"
@@ -131,6 +140,21 @@ jobs:
             "openAIApiKey=${OPENAI_API_KEY}"
             "securityApiKey=${SECURITY_API_KEY}"
           )
+
+          if [ -n "${ALERT_SRE_ONCALL_EMAILS:-}" ]; then
+            sre_oncall_json="$(echo "${ALERT_SRE_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("sreOnCallEmailAddresses=${sre_oncall_json}")
+          fi
+
+          if [ -n "${ALERT_APP_ONCALL_EMAILS:-}" ]; then
+            app_oncall_json="$(echo "${ALERT_APP_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("appOnCallEmailAddresses=${app_oncall_json}")
+          fi
+
+          if [ -n "${ALERT_ADDITIONAL_ACTION_GROUP_IDS:-}" ]; then
+            additional_action_group_ids_json="$(echo "${ALERT_ADDITIONAL_ACTION_GROUP_IDS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("additionalAlertActionGroupResourceIds=${additional_action_group_ids_json}")
+          fi
 
           az deployment sub what-if \
             --location "${AZURE_LOCATION}" \
@@ -160,6 +184,9 @@ jobs:
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
+      ALERT_SRE_ONCALL_EMAILS: ${{ vars.ALERT_SRE_ONCALL_EMAILS }}
+      ALERT_APP_ONCALL_EMAILS: ${{ vars.ALERT_APP_ONCALL_EMAILS }}
+      ALERT_ADDITIONAL_ACTION_GROUP_IDS: ${{ vars.ALERT_ADDITIONAL_ACTION_GROUP_IDS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -180,8 +207,14 @@ jobs:
           search_index_name="${SEARCH_INDEX_NAME:-documents}"
           storage_container_name="${STORAGE_CONTAINER_NAME:-documents}"
           openai_api_version="${OPENAI_API_VERSION:-2024-10-21}"
+          param_file="infra/main.${DEPLOY_ENV}.parameters.json"
 
-          params=(
+          params=()
+          if [ -f "${param_file}" ]; then
+            params+=("@${param_file}")
+          fi
+
+          params+=(
             "environment=${DEPLOY_ENV}"
             "location=${AZURE_LOCATION}"
             "resourceGroupName=${resource_group_name}"
@@ -203,6 +236,21 @@ jobs:
             "openAIApiKey=${OPENAI_API_KEY}"
             "securityApiKey=${SECURITY_API_KEY}"
           )
+
+          if [ -n "${ALERT_SRE_ONCALL_EMAILS:-}" ]; then
+            sre_oncall_json="$(echo "${ALERT_SRE_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("sreOnCallEmailAddresses=${sre_oncall_json}")
+          fi
+
+          if [ -n "${ALERT_APP_ONCALL_EMAILS:-}" ]; then
+            app_oncall_json="$(echo "${ALERT_APP_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("appOnCallEmailAddresses=${app_oncall_json}")
+          fi
+
+          if [ -n "${ALERT_ADDITIONAL_ACTION_GROUP_IDS:-}" ]; then
+            additional_action_group_ids_json="$(echo "${ALERT_ADDITIONAL_ACTION_GROUP_IDS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("additionalAlertActionGroupResourceIds=${additional_action_group_ids_json}")
+          fi
 
           az deployment sub create \
             --location "${AZURE_LOCATION}" \
@@ -283,6 +331,9 @@ jobs:
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
+      ALERT_SRE_ONCALL_EMAILS: ${{ vars.ALERT_SRE_ONCALL_EMAILS }}
+      ALERT_APP_ONCALL_EMAILS: ${{ vars.ALERT_APP_ONCALL_EMAILS }}
+      ALERT_ADDITIONAL_ACTION_GROUP_IDS: ${{ vars.ALERT_ADDITIONAL_ACTION_GROUP_IDS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -304,8 +355,14 @@ jobs:
           search_index_name="${SEARCH_INDEX_NAME:-documents}"
           storage_container_name="${STORAGE_CONTAINER_NAME:-documents}"
           openai_api_version="${OPENAI_API_VERSION:-2024-10-21}"
+          param_file="infra/main.${DEPLOY_ENV}.parameters.json"
 
-          params=(
+          params=()
+          if [ -f "${param_file}" ]; then
+            params+=("@${param_file}")
+          fi
+
+          params+=(
             "environment=${DEPLOY_ENV}"
             "location=${AZURE_LOCATION}"
             "resourceGroupName=${resource_group_name}"
@@ -326,6 +383,21 @@ jobs:
             "openAIApiKey=${OPENAI_API_KEY}"
             "securityApiKey=${SECURITY_API_KEY}"
           )
+
+          if [ -n "${ALERT_SRE_ONCALL_EMAILS:-}" ]; then
+            sre_oncall_json="$(echo "${ALERT_SRE_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("sreOnCallEmailAddresses=${sre_oncall_json}")
+          fi
+
+          if [ -n "${ALERT_APP_ONCALL_EMAILS:-}" ]; then
+            app_oncall_json="$(echo "${ALERT_APP_ONCALL_EMAILS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("appOnCallEmailAddresses=${app_oncall_json}")
+          fi
+
+          if [ -n "${ALERT_ADDITIONAL_ACTION_GROUP_IDS:-}" ]; then
+            additional_action_group_ids_json="$(echo "${ALERT_ADDITIONAL_ACTION_GROUP_IDS}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+            params+=("additionalAlertActionGroupResourceIds=${additional_action_group_ids_json}")
+          fi
 
           result="$(az deployment sub create \
             --location "${AZURE_LOCATION}" \
