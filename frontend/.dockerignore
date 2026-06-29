@@ -41,7 +41,6 @@ Thumbs.db
 # Development files
 *.md
 LICENSE
-vite.config.ts
 vitest.config.ts
 playwright.config.ts
 eslint.config.js
