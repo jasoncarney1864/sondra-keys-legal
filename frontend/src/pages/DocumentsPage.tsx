@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  createSession,
   deleteDocument,
   downloadDocument,
   getDocumentDownloadUrl,
@@ -16,6 +17,7 @@ import { formatDateTime, formatFileSize } from '../lib/format'
 type DocumentsPageProps = {
   sessionId: string | null
   currentUserId: string | null
+  onSessionSelected: (sessionId: string) => void
 }
 
 type DocumentSourceFilter = 'all' | 'uploads' | 'hud'
@@ -49,7 +51,7 @@ function toFriendlyHudError(error: Error): { message: string; friendly: boolean 
   }
 }
 
-export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) {
+export function DocumentsPage({ sessionId, currentUserId, onSessionSelected }: DocumentsPageProps) {
   const [file, setFile] = useState<File | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -94,10 +96,14 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
 
   const uploadMutation = useMutation({
     mutationFn: async (selected: File) => {
-      if (!sessionId) {
-        throw new Error('A session is required before uploading.')
+      let resolvedSessionId = sessionId
+      if (!resolvedSessionId) {
+        const created = await createSession()
+        resolvedSessionId = created.session_id
+        onSessionSelected(resolvedSessionId)
       }
-      return uploadDocument(sessionId, selected)
+
+      return uploadDocument(resolvedSessionId, selected)
     },
     onSuccess: async (payload) => {
       setMessage(payload.message)
@@ -307,12 +313,16 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
           />
           <button
             type="submit"
-            disabled={!sessionId || uploadMutation.isPending}
+            disabled={uploadMutation.isPending}
             className="primary"
           >
             {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
           </button>
         </form>
+
+        {!sessionId ? (
+          <p className="muted">No active session yet. Upload will automatically create one.</p>
+        ) : null}
 
         {message ? <p className="notice success">{message}</p> : null}
         {error ? <p className="notice error">{error}</p> : null}
@@ -373,7 +383,7 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
                     Upload a file in this session to create a user-linked record.
                   </p>
                 ) : (
-                  <p className="muted">Select or create a session first, then upload to populate this grid.</p>
+                  <p className="muted">Upload a file to automatically create a session and populate this grid.</p>
                 )}
               </>
             ) : (

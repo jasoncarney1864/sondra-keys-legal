@@ -144,6 +144,7 @@ function App() {
               <DocumentsPage
                 sessionId={sessionId}
                 currentUserId={currentUserId}
+                onSessionSelected={selectSession}
               />
             }
           />
