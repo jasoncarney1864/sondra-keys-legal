@@ -64,6 +64,10 @@ param documentIntelligenceApiKey string
 @secure()
 param openAIApiKey string
 
+@description('Shared API key used by frontend reverse proxy and backend auth')
+@secure()
+param securityApiKey string
+
 // Resource group
 resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: resourceGroupName
@@ -189,6 +193,10 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
         name: 'ENVIRONMENT'
         value: environment
       }
+      {
+        name: 'SECURITY_API_KEY'
+        secretRef: 'security-api-key'
+      }
     ]
     secrets: [
       {
@@ -206,6 +214,10 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
       {
         name: 'openai-api-key'
         value: openAIApiKey
+      }
+      {
+        name: 'security-api-key'
+        value: securityApiKey
       }
     ]
   }
@@ -227,11 +239,20 @@ module frontendApp 'modules/container-app.bicep' = if (deployApps) {
     maxReplicas: 5
     environmentVariables: [
       {
-        name: 'VITE_API_BASE_URL'
+        name: 'BACKEND_URL'
         value: 'https://${backendApp.outputs.fqdn}'
       }
+      {
+        name: 'API_KEY'
+        secretRef: 'frontend-api-key'
+      }
     ]
-    secrets: []
+    secrets: [
+      {
+        name: 'frontend-api-key'
+        value: securityApiKey
+      }
+    ]
   }
 }
 

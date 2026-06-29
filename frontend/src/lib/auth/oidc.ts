@@ -21,6 +21,8 @@ const AUTH_MODE =
     : 'api_key'
 
 const API_KEY = (import.meta.env.VITE_API_KEY ?? '').trim()
+const IS_LOCAL_HOST = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+const USES_PROXY_API_AUTH = API_KEY.length === 0 && !IS_LOCAL_HOST
 const OIDC_CLIENT_ID = (import.meta.env.VITE_OIDC_CLIENT_ID ?? '').trim()
 const OIDC_TENANT_ID = (import.meta.env.VITE_OIDC_TENANT_ID ?? '').trim()
 const OIDC_SCOPES = ((import.meta.env.VITE_OIDC_SCOPES ?? 'openid profile email') as string)
@@ -41,7 +43,8 @@ export function getAuthSettings(): AuthSettings {
   return {
     mode: AUTH_MODE,
     apiKey: API_KEY,
-    hasApiKey: API_KEY.length > 0,
+    // In deployed container builds, API auth can be injected by nginx reverse proxy.
+    hasApiKey: API_KEY.length > 0 || USES_PROXY_API_AUTH,
     oidcConfigured: OIDC_CLIENT_ID.length > 0 && OIDC_TENANT_ID.length > 0,
     oidcScopes: OIDC_SCOPES,
   }

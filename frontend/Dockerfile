@@ -26,8 +26,8 @@ FROM nginx:alpine
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy nginx configuration
-COPY <<EOF /etc/nginx/conf.d/default.conf
+# Copy nginx configuration template (rendered with env vars at startup)
+COPY <<EOF /etc/nginx/templates/default.conf.template
 server {
     listen 80;
     server_name _;
@@ -44,6 +44,16 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
+
+    # Proxy API traffic to backend and inject API key server-side.
+    location /api/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-API-Key \$API_KEY;
+        proxy_pass \${BACKEND_URL};
+    }
 
     # Handle client-side routing
     location / {

@@ -98,7 +98,7 @@ export function AppLayout({
         {showAuthWarning ? (
           <div className="alert warn" role="alert">
             {authMode === 'api_key'
-              ? 'VITE_API_KEY is not set. Add it in frontend/.env.local to authenticate requests.'
+              ? 'API key auth is not configured for local browser requests. Add VITE_API_KEY in frontend/.env.local for local development.'
               : 'Sign in with OIDC to run backend requests.'}
           </div>
         ) : null}

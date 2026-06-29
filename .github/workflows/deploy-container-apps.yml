@@ -55,6 +55,7 @@ jobs:
       STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,6 +84,7 @@ jobs:
             STORAGE_CONNECTION_STRING
             DOCUMENT_INTELLIGENCE_API_KEY
             OPENAI_API_KEY
+            SECURITY_API_KEY
           )
 
           missing=()
@@ -127,6 +129,7 @@ jobs:
             "storageConnectionString=${STORAGE_CONNECTION_STRING}"
             "documentIntelligenceApiKey=${DOCUMENT_INTELLIGENCE_API_KEY}"
             "openAIApiKey=${OPENAI_API_KEY}"
+            "securityApiKey=${SECURITY_API_KEY}"
           )
 
           az deployment sub what-if \
@@ -156,6 +159,7 @@ jobs:
       STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -197,6 +201,7 @@ jobs:
             "storageConnectionString=${STORAGE_CONNECTION_STRING}"
             "documentIntelligenceApiKey=${DOCUMENT_INTELLIGENCE_API_KEY}"
             "openAIApiKey=${OPENAI_API_KEY}"
+            "securityApiKey=${SECURITY_API_KEY}"
           )
 
           az deployment sub create \
@@ -277,6 +282,7 @@ jobs:
       STORAGE_CONNECTION_STRING: ${{ secrets.STORAGE_CONNECTION_STRING }}
       DOCUMENT_INTELLIGENCE_API_KEY: ${{ secrets.DOCUMENT_INTELLIGENCE_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SECURITY_API_KEY: ${{ secrets.SECURITY_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -318,6 +324,7 @@ jobs:
             "storageConnectionString=${STORAGE_CONNECTION_STRING}"
             "documentIntelligenceApiKey=${DOCUMENT_INTELLIGENCE_API_KEY}"
             "openAIApiKey=${OPENAI_API_KEY}"
+            "securityApiKey=${SECURITY_API_KEY}"
           )
 
           result="$(az deployment sub create \
