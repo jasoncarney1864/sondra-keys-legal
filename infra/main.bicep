@@ -68,6 +68,8 @@ param openAIApiKey string
 @secure()
 param securityApiKey string
 
+var storageAccountKey = first(split(last(split(storageConnectionString, 'AccountKey=')), ';'))
+
 // Resource group
 resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: resourceGroupName
@@ -146,6 +148,10 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
         value: searchServiceName
       }
       {
+        name: 'AZURE_SEARCH_SERVICE_NAME'
+        value: searchServiceName
+      }
+      {
         name: 'AI_SEARCH_INDEX_NAME'
         value: searchIndexName
       }
@@ -154,8 +160,24 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
         secretRef: 'search-api-key'
       }
       {
+        name: 'AZURE_SEARCH_API_KEY'
+        secretRef: 'search-api-key'
+      }
+      {
         name: 'AZURE_STORAGE_CONNECTION_STRING'
         secretRef: 'storage-connection-string'
+      }
+      {
+        name: 'AZURE_BLOB_ACCOUNT_NAME'
+        value: storageAccountName
+      }
+      {
+        name: 'AZURE_BLOB_ACCOUNT_KEY'
+        secretRef: 'blob-account-key'
+      }
+      {
+        name: 'AZURE_BLOB_CONTAINER_NAME'
+        value: storageContainerName
       }
       {
         name: 'AZURE_STORAGE_CONTAINER_NAME'
@@ -167,6 +189,14 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
       }
       {
         name: 'AZURE_DOCUMENT_INTELLIGENCE_KEY'
+        secretRef: 'doc-intelligence-key'
+      }
+      {
+        name: 'AZURE_CONTENT_UNDERSTANDING_ENDPOINT'
+        value: documentIntelligenceEndpoint
+      }
+      {
+        name: 'AZURE_CONTENT_UNDERSTANDING_KEY'
         secretRef: 'doc-intelligence-key'
       }
       {
@@ -210,6 +240,10 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
       {
         name: 'doc-intelligence-key'
         value: documentIntelligenceApiKey
+      }
+      {
+        name: 'blob-account-key'
+        value: storageAccountKey
       }
       {
         name: 'openai-api-key'

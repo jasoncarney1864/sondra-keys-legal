@@ -24,6 +24,25 @@ function isHudDocument(document: { uploaded_by_user_id: string | null; file_name
   return document.uploaded_by_user_id === null && document.file_name.trim().startsWith('[HUD]')
 }
 
+function toFriendlyHudError(error: Error): string {
+  const normalized = error.message.toLowerCase()
+  const likelyHudOutage =
+    normalized.includes('request failed') ||
+    normalized.includes('bad gateway') ||
+    normalized.includes('gateway timeout') ||
+    normalized.includes('failed to fetch') ||
+    normalized.includes('timed out') ||
+    normalized.includes('503') ||
+    normalized.includes('502') ||
+    normalized.includes('504')
+
+  if (likelyHudOutage) {
+    return 'HUD sources are temporarily unavailable right now. You can still upload and search your own documents.'
+  }
+
+  return `HUD source sync is currently unavailable. You can still upload and search your own documents. Details: ${error.message}`
+}
+
 export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) {
   const [file, setFile] = useState<File | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -194,6 +213,13 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
     })
   }, [sortedDocuments, sourceFilter])
 
+  const hudSyncErrorMessage = hudSyncMutation.isError
+    ? toFriendlyHudError(hudSyncMutation.error as Error)
+    : null
+  const hudSourcesErrorMessage = hudSourcesQuery.isError
+    ? toFriendlyHudError(hudSourcesQuery.error as Error)
+    : null
+
   function onUploadSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!file) {
@@ -254,13 +280,9 @@ export function DocumentsPage({ sessionId, currentUserId }: DocumentsPageProps) 
           </p>
         ) : null}
 
-        {hudSyncMutation.isError ? (
-          <p className="notice error">{(hudSyncMutation.error as Error).message}</p>
-        ) : null}
+        {hudSyncErrorMessage ? <p className="notice error">{hudSyncErrorMessage}</p> : null}
 
-        {hudSourcesQuery.isError ? (
-          <p className="notice error">{(hudSourcesQuery.error as Error).message}</p>
-        ) : null}
+        {hudSourcesErrorMessage ? <p className="notice error">{hudSourcesErrorMessage}</p> : null}
       </div>
 
       <div className="card">
