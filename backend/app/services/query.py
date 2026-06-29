@@ -510,16 +510,22 @@ If insufficient information is available, state that clearly.\
             LLMServiceException: On other API errors
         """
         try:
-            response = await self.openai_client.chat.completions.create(
-                model=self.chat_model,
-                messages=[
+            request_kwargs: dict[str, Any] = {
+                "model": self.chat_model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                temperature=0.2,  # Lower temperature for more deterministic legal answers
-                max_completion_tokens=1024,  # Sufficient for most legal explanations
-                top_p=0.95,
-            )
+                "max_completion_tokens": 1024,  # Sufficient for most legal explanations
+            }
+
+            # GPT-5 serverless deployments only accept default sampling values.
+            # Keep deterministic overrides for prior chat models.
+            if not self.chat_model.lower().startswith("gpt-5"):
+                request_kwargs["temperature"] = 0.2
+                request_kwargs["top_p"] = 0.95
+
+            response = await self.openai_client.chat.completions.create(**request_kwargs)
 
             answer = response.choices[0].message.content
             logger.debug(
