@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AZURE_LOCATION: eastus
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'eastus' }}
   DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
   IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.imageTag || github.sha }}
 
