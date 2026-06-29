@@ -518,7 +518,6 @@ If insufficient information is available, state that clearly.\
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                "max_tokens": 1024,  # Sufficient for most legal explanations
             }
 
             # GPT-5 serverless deployments only accept default sampling values.
