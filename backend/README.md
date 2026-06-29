@@ -346,6 +346,11 @@ Configured via OpenTelemetry exporter for:
 - Exception tracking
 - Custom events
 
+Runtime behavior:
+- Backend auto-enables Azure Monitor when `APPLICATIONINSIGHTS_CONNECTION_STRING` is present.
+- Startup logs `monitoring_configured_azure_monitor` on success.
+- Monitoring init failures are non-fatal and logged as `monitoring_configuration_failed`.
+
 ## Troubleshooting
 
 ### Authentication Issues

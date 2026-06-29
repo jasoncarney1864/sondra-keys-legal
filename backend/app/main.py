@@ -76,6 +76,29 @@ logging.getLogger("azure").setLevel(logging.WARNING)
 
 logger = structlog.get_logger(__name__)
 
+
+def configure_monitoring() -> None:
+    """Enable Azure Monitor telemetry when Application Insights is configured."""
+    connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    if not connection_string:
+        logger.info("monitoring_not_configured_app_insights_connection_string_missing")
+        return
+
+    try:
+        from azure.monitor.opentelemetry import configure_azure_monitor
+
+        configure_azure_monitor(connection_string=connection_string)
+        logger.info("monitoring_configured_azure_monitor")
+    except Exception as e:
+        # Monitoring failures should never block API startup.
+        logger.warning(
+            "monitoring_configuration_failed",
+            error=f"{type(e).__name__}: {e}",
+        )
+
+
+configure_monitoring()
+
 INDEX_SANITY_LOCK_FILE = "/tmp/startup_index_sanity_check.lock"
 SESSION_RETENTION_LOCK_FILE = "/tmp/startup_session_retention_cleanup.lock"
 

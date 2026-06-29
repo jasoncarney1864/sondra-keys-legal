@@ -218,6 +218,10 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
         secretRef: 'openai-api-key'
       }
       {
+        name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+        value: monitoring.outputs.appInsightsConnectionString
+      }
+      {
         name: 'OPENAI_API_KEY'
         secretRef: 'openai-api-key'
       }
