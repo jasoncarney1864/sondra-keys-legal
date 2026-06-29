@@ -8,6 +8,9 @@ WORKDIR /app
 # Copy package files
 COPY package.json package-lock.json* ./
 
+# Copy TypeScript project configs required by `tsc -b`
+COPY tsconfig*.json ./
+
 # Install dependencies
 RUN npm ci
 
