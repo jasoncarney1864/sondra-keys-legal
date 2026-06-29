@@ -357,6 +357,7 @@ Runtime behavior:
   - `sondra.session.hash`
   - `sondra.active_document.hash`
   - `sondra.scoped_document.hashes`
+- If the installed OpenAI SDK is incompatible with the OpenTelemetry OpenAI instrumentor, startup logs `tracing_openai_instrumentation_skipped_incompatible_openai_sdk` and continues without failing.
 
 Tracing toggles:
 - `TRACING_ENABLED` (default `true`): enables tracing bootstrap.
