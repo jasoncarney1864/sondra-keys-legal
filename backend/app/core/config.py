@@ -168,6 +168,10 @@ class SecuritySettings(BaseSettings):
         default=["http://localhost:3000", "http://localhost:8000"],
         description="Allowed CORS origins"
     )
+    trusted_hosts: list[str] = Field(
+        default=["localhost", "127.0.0.1", "*.azurecontainerapps.io"],
+        description="Allowed hosts for TrustedHostMiddleware"
+    )
     max_file_size_mb: int = Field(
         default=50,
         description="Maximum allowed file upload size in MB"

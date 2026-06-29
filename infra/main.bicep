@@ -70,6 +70,7 @@ param securityApiKey string
 
 var storageAccountKey = first(split(last(split(storageConnectionString, 'AccountKey=')), ';'))
 var appEnvironment = environment == 'prod' ? 'production' : (environment == 'staging' ? 'staging' : 'development')
+var databasePasswordEncoded = uriComponent(databaseAdminPassword)
 
 // Resource group
 resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
@@ -141,8 +142,8 @@ module backendApp 'modules/container-app.bicep' = if (deployApps) {
     maxReplicas: 3
     environmentVariables: [
       {
-        name: 'DATABASE_URL'
-        value: 'postgresql://${databaseAdminUsername}:${databaseAdminPassword}@${database.outputs.fqdn}:5432/sondra_legal'
+        name: 'DB_DATABASE_URL'
+        value: 'postgresql+asyncpg://${databaseAdminUsername}:${databasePasswordEncoded}@${database.outputs.fqdn}:5432/sondra_legal'
       }
       {
         name: 'AI_SEARCH_SERVICE_NAME'

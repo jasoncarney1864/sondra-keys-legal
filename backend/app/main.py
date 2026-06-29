@@ -694,7 +694,7 @@ app = FastAPI(
 # Security middleware: Trusted hosts only
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["localhost", "127.0.0.1"],
+    allowed_hosts=settings.security.trusted_hosts,
 )
 
 # CORS middleware
