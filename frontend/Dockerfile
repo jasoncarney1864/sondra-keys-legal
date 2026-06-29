@@ -33,6 +33,7 @@ server {
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
+    client_max_body_size 55m;
 
     # Enable gzip compression
     gzip on;

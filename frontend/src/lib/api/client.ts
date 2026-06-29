@@ -46,16 +46,29 @@ function buildUrl(path: string): string {
 }
 
 async function parseError(response: Response): Promise<string> {
-  try {
-    const payload = (await response.json()) as ApiErrorEnvelope
-    if (payload?.detail) {
-      return payload.detail
+  const rawBody = await response.text()
+
+  if (rawBody) {
+    try {
+      const payload = JSON.parse(rawBody) as ApiErrorEnvelope
+      if (payload?.detail) {
+        return payload.detail
+      }
+    } catch {
+      // Non-JSON response bodies (for example nginx error pages) are handled below.
     }
-  } catch {
-    // Fall back to status text when body is not JSON.
+
+    // HTML error pages are noisy; prefer concise status-based messaging.
+    if (!rawBody.trim().startsWith('<')) {
+      return rawBody
+    }
   }
 
-  return response.statusText || 'Request failed'
+  if (response.status === 413) {
+    return 'File is too large. Maximum upload size is 50 MB.'
+  }
+
+  return response.statusText || `Request failed (HTTP ${response.status})`
 }
 
 type RequestOptions = {
