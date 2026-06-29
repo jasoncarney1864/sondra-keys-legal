@@ -119,8 +119,7 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
 }
 
 // Backend Container App
-module backendApp 'modules/container-app.bicep' = {
-  if (deployApps)
+module backendApp 'modules/container-app.bicep' = if (deployApps) {
   scope: rg
   name: 'backend-app-deployment'
   params: {
@@ -213,8 +212,7 @@ module backendApp 'modules/container-app.bicep' = {
 }
 
 // Frontend Container App
-module frontendApp 'modules/container-app.bicep' = {
-  if (deployApps)
+module frontendApp 'modules/container-app.bicep' = if (deployApps) {
   scope: rg
   name: 'frontend-app-deployment'
   params: {
