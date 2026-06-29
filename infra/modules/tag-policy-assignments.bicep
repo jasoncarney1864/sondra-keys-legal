@@ -62,12 +62,12 @@ resource requireCreatorTagAssignment 'Microsoft.Authorization/policyAssignments@
 resource requireDateCreatedTagAssignment 'Microsoft.Authorization/policyAssignments@2024-04-01' = {
   name: 'pa-sondra-require-tag-datecreated'
   properties: {
-    displayName: 'Require DateCreated tag'
-    description: 'Enforces DateCreated tag on new resources.'
+    displayName: 'Require Date Created tag'
+    description: 'Enforces Date Created tag on new resources.'
     policyDefinitionId: policyDefinitionId
     parameters: {
       tagName: {
-        value: 'DateCreated'
+        value: 'Date Created'
       }
     }
   }

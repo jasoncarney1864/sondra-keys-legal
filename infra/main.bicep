@@ -106,7 +106,7 @@ var commonTags = {
   Project: projectTag
   Owner: ownerTag
   Creator: creatorTag
-  DateCreated: dateCreatedTag
+  'Date Created': dateCreatedTag
   ManagedBy: 'bicep'
 }
 
