@@ -43,7 +43,7 @@ jobs:
         run: pip install -r backend/requirements.txt
 
       - name: Run backend tests
-        run: pytest backend/tests -q --maxfail=1
+        run: PYTHONPATH=. python -m pytest backend/tests -q --maxfail=1
 
   frontend-quality:
     name: Frontend Lint, Unit Test, Build
