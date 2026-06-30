@@ -16,6 +16,7 @@ import { getAuthSettings, getOidcAccessToken } from '../auth/oidc'
 type ApiSettings = {
   baseUrl: string
   authMode: 'api_key' | 'oidc'
+  oidcProvider: 'msal' | 'google'
   hasApiKey: boolean
   oidcConfigured: boolean
 }
@@ -124,6 +125,7 @@ export function getApiSettings(): ApiSettings {
   return {
     baseUrl: API_BASE_URL,
     authMode: authSettings.mode,
+    oidcProvider: authSettings.oidcProvider,
     hasApiKey: authSettings.hasApiKey,
     oidcConfigured: authSettings.oidcConfigured,
   }

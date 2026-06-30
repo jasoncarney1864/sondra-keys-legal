@@ -39,11 +39,14 @@ Required:
 
 - `VITE_AUTH_MODE`: `api_key` or `oidc`.
 - If `VITE_AUTH_MODE=api_key`: `VITE_API_KEY` must match backend `SECURITY_API_KEY`.
-- If `VITE_AUTH_MODE=oidc`: configure `VITE_OIDC_CLIENT_ID` and `VITE_OIDC_TENANT_ID`.
+- If `VITE_AUTH_MODE=oidc`: configure `VITE_OIDC_PROVIDER` and `VITE_OIDC_CLIENT_ID`.
+- If `VITE_AUTH_MODE=oidc` and `VITE_OIDC_PROVIDER=msal`: also configure `VITE_OIDC_TENANT_ID`.
+- If `VITE_AUTH_MODE=oidc` and `VITE_OIDC_PROVIDER=google`: backend must validate Google ID tokens and enforce email allowlist.
 
 Optional:
 
 - `VITE_API_BASE_URL`: leave empty for local Vite proxy.
+- `VITE_OIDC_PROVIDER`: `msal` (default) or `google`.
 - `VITE_OIDC_SCOPES`: defaults to `openid profile email`.
 - `VITE_OIDC_REDIRECT_URI`: defaults to current origin.
 

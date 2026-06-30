@@ -165,8 +165,24 @@ async def get_current_user_id(
     token = authorization.split(" ", 1)[1].strip()
     payload = _decode_oidc_token(token)
 
+    email_claim = settings.security.oidc_email_claim
+    email_value = str(payload.get(email_claim) or "").strip().lower()
+    allowed_emails = settings.security.oidc_allowed_emails
+    if allowed_emails:
+        if not email_value:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Bearer token missing '{email_claim}' claim required for allowlist checks.",
+            )
+        if email_value not in allowed_emails:
+            logger.warning("oidc_email_not_allowed email=%s", email_value)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Signed-in email is not allowed to access this application.",
+            )
+
     user_claim = settings.security.oidc_user_id_claim
-    user_id = str(payload.get(user_claim) or "").strip()
+    user_id = str(payload.get(user_claim) or email_value or "").strip()
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

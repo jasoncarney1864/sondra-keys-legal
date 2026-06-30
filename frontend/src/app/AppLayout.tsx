@@ -5,6 +5,7 @@ type AppLayoutProps = {
   sessionDisplayLabel: string | null
   isSessionLoading: boolean
   authMode: 'api_key' | 'oidc'
+  oidcProvider?: 'msal' | 'google'
   hasApiKey: boolean
   authReady: boolean
   authIdentity: string | null
@@ -19,6 +20,7 @@ export function AppLayout({
   sessionDisplayLabel,
   isSessionLoading,
   authMode,
+  oidcProvider,
   hasApiKey,
   authReady,
   authIdentity,
@@ -75,7 +77,9 @@ export function AppLayout({
                   : 'API key missing'
                 : authReady
                   ? authIdentity ?? 'OIDC signed in'
-                  : 'OIDC sign-in required'}
+                  : oidcProvider === 'google'
+                    ? 'Google sign-in required'
+                    : 'OIDC sign-in required'}
             </p>
             {authMode === 'oidc' ? (
               <div className="auth-actions">
@@ -85,7 +89,7 @@ export function AppLayout({
                   </button>
                 ) : (
                   <button type="button" className="primary" onClick={onSignIn} disabled={authActionBusy}>
-                    Sign in
+                    {oidcProvider === 'google' ? 'Sign in with Google' : 'Sign in'}
                   </button>
                 )}
               </div>
@@ -99,7 +103,9 @@ export function AppLayout({
           <div className="alert warn" role="alert">
             {authMode === 'api_key'
               ? 'API key auth is not configured for local browser requests. Add VITE_API_KEY in frontend/.env.local for local development.'
-              : 'Sign in with OIDC to run backend requests.'}
+              : oidcProvider === 'google'
+                ? 'Sign in with your approved Google account to run backend requests.'
+                : 'Sign in with OIDC to run backend requests.'}
           </div>
         ) : null}
         {authError ? (

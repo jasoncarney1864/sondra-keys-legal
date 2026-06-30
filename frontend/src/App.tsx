@@ -124,6 +124,7 @@ function App() {
                 sessionDisplayLabel={sessionDisplayLabel}
                 isSessionLoading={sessionQuery.isLoading}
                 authMode={apiSettings.authMode}
+                oidcProvider={apiSettings.authMode === 'oidc' ? apiSettings.oidcProvider : undefined}
                 hasApiKey={apiSettings.hasApiKey}
                 authReady={authReady}
                 authIdentity={authIdentity}

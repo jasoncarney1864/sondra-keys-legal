@@ -3,8 +3,8 @@ Application configuration using Pydantic Settings.
 Manages all environment variables and configuration for the FastAPI application.
 """
 
-from typing import Optional
-from pydantic_settings import BaseSettings
+from typing import Optional, Any, Annotated
+from pydantic_settings import BaseSettings, NoDecode
 from pydantic import Field, AnyHttpUrl, field_validator
 
 
@@ -160,6 +160,14 @@ class SecuritySettings(BaseSettings):
         default="sub",
         description="Claim name used as stable user identifier"
     )
+    oidc_email_claim: str = Field(
+        default="email",
+        description="Claim name used to resolve user email for OIDC allowlisting"
+    )
+    oidc_allowed_emails: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description="Allowed email addresses for OIDC sign-in. Empty list means allow any authenticated OIDC user."
+    )
     oidc_algorithms: list[str] = Field(
         default_factory=lambda: ["RS256"],
         description="Allowed JWT signature algorithms"
@@ -189,6 +197,30 @@ class SecuritySettings(BaseSettings):
         if v not in valid_modes:
             raise ValueError(f"auth_mode must be one of {valid_modes}")
         return v
+
+    @field_validator("oidc_allowed_emails", mode="before")
+    @classmethod
+    def normalize_oidc_allowed_emails(cls, v: Any) -> list[str]:
+        """Accept comma-separated env values and normalize to lowercase unique list."""
+        values: list[str]
+        if v is None:
+            values = []
+        elif isinstance(v, str):
+            values = [item.strip() for item in v.split(",") if item.strip()]
+        elif isinstance(v, list):
+            values = [str(item).strip() for item in v if str(item).strip()]
+        else:
+            raise ValueError("oidc_allowed_emails must be a list or comma-separated string")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            lower = item.lower()
+            if lower in seen:
+                continue
+            seen.add(lower)
+            normalized.append(lower)
+        return normalized
 
     class Config:
         env_prefix = "SECURITY_"
